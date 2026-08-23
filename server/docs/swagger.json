@@ -1,0 +1,895 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "轻量主机 + 容器监控 Server REST 接口（前端面板取数）。Agent↔Server 走 gRPC，契约见 docs/proto.html。",
+        "title": "litesentry API",
+        "termsOfService": "http://localhost:8080/",
+        "contact": {
+            "name": "litesentry",
+            "url": "https://github.com/"
+        },
+        "version": "0.1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/api",
+    "paths": {
+        "/agents": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "全部 Agent 最新状态，含 IPv4/IPv6 地址快照",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "节点"
+                ],
+                "summary": "节点列表",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/store.Agent"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/agents/{id}/containers": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "某节点在窗口内各容器的状态与资源样本，按时间升序",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "时序"
+                ],
+                "summary": "容器指标时序",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "起始 unix 秒（默认 1 小时前）",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "结束 unix 秒（默认当前）",
+                        "name": "to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/store.ContainerSample"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/agents/{id}/disks": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "某节点在窗口内各挂载点的磁盘占用样本，按时间升序",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "时序"
+                ],
+                "summary": "磁盘指标时序",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "起始 unix 秒（默认 1 小时前）",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "结束 unix 秒（默认当前）",
+                        "name": "to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/store.DiskSample"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/agents/{id}/host": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "某节点在窗口内的主机样本（CPU/内存/负载/网络/系统信息），按时间升序",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "时序"
+                ],
+                "summary": "主机指标时序",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "起始 unix 秒（默认 1 小时前）",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "结束 unix 秒（默认当前）",
+                        "name": "to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/store.HostSample"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/alerts/events": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "按时间窗口查询，可按节点 / 状态过滤；默认最近 24h",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "告警"
+                ],
+                "summary": "告警事件列表",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "起始 unix 秒",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "结束 unix 秒",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "节点 ID",
+                        "name": "agent_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "firing | resolved",
+                        "name": "state",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "条数（默认 100，最大 500）",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/store.AlertEvent"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/alerts/rules": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "告警"
+                ],
+                "summary": "告警规则列表",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/store.AlertRule"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "告警"
+                ],
+                "summary": "新建告警规则",
+                "parameters": [
+                    {
+                        "description": "规则（id 忽略）",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/store.AlertRule"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/store.AlertRule"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/alerts/rules/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "告警"
+                ],
+                "summary": "更新告警规则",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "规则 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "规则（id 取自路径）",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/store.AlertRule"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/store.AlertRule"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "告警"
+                ],
+                "summary": "删除告警规则",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "系统"
+                ],
+                "summary": "健康检查",
+                "responses": {
+                    "200": {
+                        "description": "status/time",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/settings": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "飞书 webhook 与 secret 是否存在（secret 不回显明文）",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "设置"
+                ],
+                "summary": "读取设置",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.settingsView"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "更新飞书 webhook；secret 为空表示保留原值",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "设置"
+                ],
+                "summary": "保存设置",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.settingsView"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/settings/feishu-test": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "按当前配置发送一条测试消息",
+                "tags": [
+                    "设置"
+                ],
+                "summary": "测试飞书机器人",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "未配置或发送失败",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "api.settingsView": {
+            "type": "object",
+            "properties": {
+                "feishu_secret_set": {
+                    "type": "boolean"
+                },
+                "feishu_webhook": {
+                    "type": "string"
+                }
+            }
+        },
+        "store.Agent": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "arch": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "hostname": {
+                    "type": "string"
+                },
+                "ipv4": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/store.IPAddr"
+                    }
+                },
+                "ipv6": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/store.IPAddr"
+                    }
+                },
+                "kernel": {
+                    "type": "string"
+                },
+                "last_seen": {
+                    "type": "string"
+                },
+                "os": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "Status 由 API 层计算（服务端权威）：online | offline，预留 upgrading 等扩展状态。",
+                    "type": "string"
+                },
+                "version": {
+                    "description": "Agent 构建版本（注册上报）",
+                    "type": "string"
+                }
+            }
+        },
+        "store.AlertEvent": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "agent_name": {
+                    "type": "string"
+                },
+                "entity_id": {
+                    "description": "容器规则 = 容器 id；主机/离线规则为空",
+                    "type": "string"
+                },
+                "entity_name": {
+                    "description": "容器规则 = 容器名称",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "metric": {
+                    "type": "string"
+                },
+                "notified_at": {
+                    "type": "string"
+                },
+                "resolved_at": {
+                    "type": "string"
+                },
+                "rule_id": {
+                    "type": "string"
+                },
+                "rule_name": {
+                    "type": "string"
+                },
+                "severity": {
+                    "description": "warning | critical",
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "state": {
+                    "description": "firing | resolved",
+                    "type": "string"
+                },
+                "threshold": {
+                    "type": "number"
+                },
+                "value": {
+                    "type": "number"
+                }
+            }
+        },
+        "store.AlertRule": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "duration_s": {
+                    "description": "持续超过阈值多久才触发（秒），0 = 立即",
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "metric": {
+                    "description": "cpu_pct | mem_pct | load_1m | disk_pct | container_cpu | container_mem | container_down | offline",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "op": {
+                    "description": "\u003e | \u003c",
+                    "type": "string"
+                },
+                "severity": {
+                    "description": "warning | critical",
+                    "type": "string"
+                },
+                "threshold": {
+                    "type": "number"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "store.ContainerSample": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "container_id": {
+                    "type": "string"
+                },
+                "cpu_pct": {
+                    "type": "number"
+                },
+                "image": {
+                    "type": "string"
+                },
+                "mem_limit": {
+                    "type": "integer"
+                },
+                "mem_usage": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "net_rx_bps": {
+                    "type": "integer"
+                },
+                "net_tx_bps": {
+                    "type": "integer"
+                },
+                "restarts": {
+                    "type": "integer"
+                },
+                "state": {
+                    "type": "string"
+                },
+                "ts": {
+                    "type": "string"
+                },
+                "uptime_s": {
+                    "type": "integer"
+                }
+            }
+        },
+        "store.DiskSample": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "fs": {
+                    "type": "string"
+                },
+                "mount": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "ts": {
+                    "type": "string"
+                },
+                "used": {
+                    "type": "integer"
+                }
+            }
+        },
+        "store.HostSample": {
+            "type": "object",
+            "properties": {
+                "agent_cpu_pct": {
+                    "description": "Agent 自身进程 CPU 占用（%）",
+                    "type": "number"
+                },
+                "agent_id": {
+                    "type": "string"
+                },
+                "agent_mem_rss": {
+                    "description": "Agent 自身 RSS（字节）",
+                    "type": "integer"
+                },
+                "arch": {
+                    "type": "string"
+                },
+                "cpu_pct": {
+                    "type": "number"
+                },
+                "hostname": {
+                    "type": "string"
+                },
+                "kernel": {
+                    "type": "string"
+                },
+                "load_1m": {
+                    "type": "number"
+                },
+                "load_5m": {
+                    "type": "number"
+                },
+                "mem_total": {
+                    "type": "integer"
+                },
+                "mem_used": {
+                    "type": "integer"
+                },
+                "net_rx_bps": {
+                    "type": "integer"
+                },
+                "net_tx_bps": {
+                    "type": "integer"
+                },
+                "os": {
+                    "type": "string"
+                },
+                "swap_total": {
+                    "type": "integer"
+                },
+                "swap_used": {
+                    "type": "integer"
+                },
+                "ts": {
+                    "type": "string"
+                },
+                "uptime_s": {
+                    "type": "integer"
+                }
+            }
+        },
+        "store.IPAddr": {
+            "type": "object",
+            "properties": {
+                "addr": {
+                    "type": "string"
+                },
+                "family": {
+                    "description": "ipv4 | ipv6",
+                    "type": "string"
+                },
+                "iface": {
+                    "type": "string"
+                },
+                "scope": {
+                    "description": "global | link | loopback",
+                    "type": "string"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "Agent/前端共享 token，格式：Bearer \u003ctoken\u003e",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
+    }
+}

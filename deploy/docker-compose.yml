@@ -1,0 +1,33 @@
+# litesentry 生产部署：单镜像 = nginx(HTTPS) + server(web/API + gRPC mTLS)。
+#
+# 使用：
+#   1. make docker                                       # 本地构建产物 + nginx 基础镜像打包
+#   2. ./deploy/gen-certs.sh ./certs 'DNS:你的主机名,IP:你的IP'   # 生成证书
+#   3. 复制 .env.example 为 .env 并填好 LITESENTRY_TOKEN / LITESENTRY_JWT_SECRET / LITESENTRY_BOOTSTRAP_PASS
+#   4. docker compose up -d --build
+#
+# 暴露端口：443（浏览器 HTTPS）、9000（Agent gRPC mTLS）。
+services:
+  litesentry:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: litesentry:latest
+    container_name: litesentry
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "9000:9000"
+    volumes:
+      # 证书只在运行时挂载，不进镜像；路径相对本文件（deploy/../certs = 仓库根/certs）
+      - ../certs:/etc/litesentry/certs:ro
+      - litesentry-db:/var/lib/litesentry
+    environment:
+      LITESENTRY_TOKEN: ${LITESENTRY_TOKEN:?请在 .env 中设置 LITESENTRY_TOKEN}
+      LITESENTRY_JWT_SECRET: ${LITESENTRY_JWT_SECRET:?请在 .env 中设置 LITESENTRY_JWT_SECRET}
+      LITESENTRY_BOOTSTRAP_USER: ${LITESENTRY_BOOTSTRAP_USER:-admin}
+      LITESENTRY_BOOTSTRAP_PASS: ${LITESENTRY_BOOTSTRAP_PASS:?请在 .env 中设置 LITESENTRY_BOOTSTRAP_PASS（禁止 admin）}
+      LITESENTRY_ALLOW_AGENTS: ${LITESENTRY_ALLOW_AGENTS:-}
+
+volumes:
+  litesentry-db:

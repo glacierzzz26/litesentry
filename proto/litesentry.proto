@@ -1,0 +1,133 @@
+// litesentry 数据契约（唯一 proto 源）
+//
+// 阶段一：Agent 定时上报主机 + 容器指标。
+// - 通信走 IPv4，Agent 通过 gRPC metadata 携带 token（证书 TLS/mTLS 预留，
+//   测试阶段明文联调，上线前启用）。
+// - Series 通用字段已预留，阶段二插件化直接启用。
+syntax = "proto3";
+
+package litesentry;
+
+option go_package = "litesentry/server/gen;litesentrypb";
+
+// ============ 基础消息 ============
+
+// 网卡地址（IPv4 / IPv6，含 iface 与 scope）
+message IPAddr {
+  string family = 1;   // ipv4 | ipv6
+  string addr   = 2;
+  string iface  = 3;
+  string scope  = 4;   // global | link | loopback
+}
+
+message Mem {
+  uint64 total = 1;
+  uint64 used  = 2;
+}
+
+message Disk {
+  string mount = 1;
+  string fs    = 2;
+  uint64 total = 3;
+  uint64 used  = 4;
+}
+
+// 网络速率（前后两采样差分得到）
+message Net {
+  uint64 rx_bps = 1;
+  uint64 tx_bps = 2;
+}
+
+// ============ 主机指标 ============
+
+message HostMetrics {
+  string hostname = 1;
+  string os       = 2;
+  string arch     = 3;
+  string kernel   = 4;
+  uint64 uptime_s = 5;
+  float  load_1m  = 6;
+  float  load_5m  = 7;
+  float  cpu_pct  = 8;
+  Mem    mem      = 9;
+  Mem    swap     = 10;
+  repeated Disk   disks  = 11;
+  Net    net      = 12;
+  repeated IPAddr ips    = 13;   // IPv4 + IPv6 全量地址
+
+  // Agent 自身进程占用（读 /proc/self；用于监控采集端自身开销）
+  float  agent_cpu_pct = 14;   // 自身进程周期 CPU 占用（%）
+  uint64 agent_mem_rss = 15;   // 自身 RSS（字节）
+}
+
+// ============ 容器指标 ============
+
+// 容器内存（usage/limit，区别于主机的 total/used）
+message ContainerMem {
+  uint64 usage = 1;
+  uint64 limit = 2;
+}
+
+message ContainerMetrics {
+  string id       = 1;
+  string name     = 2;
+  string image    = 3;
+  string state    = 4;
+  uint32 restarts = 5;
+  uint64 uptime_s = 6;
+  float  cpu_pct  = 7;
+  ContainerMem mem = 8;
+  Net net          = 9;
+}
+
+// ============ 通用插件数据（阶段二启用，阶段一预留） ============
+
+message Series {
+  string                name   = 1;   // e.g. "postgres.connections"
+  map<string, string>   tags   = 2;   // 维度: instance, db...
+  map<string, double>   fields = 3;   // 指标: active=12
+  uint64                ts     = 4;
+}
+
+// ============ 上报批 ============
+
+message MetricsBatch {
+  string agent_id             = 1;
+  uint64 ts                   = 2;   // unix 秒
+  HostMetrics host            = 3;
+  repeated ContainerMetrics containers = 4;
+  repeated Series series      = 5;   // 阶段二启用，阶段一不填充
+}
+
+message PushAck {
+  string server_time = 1;
+  string message     = 2;
+}
+
+// ============ 注册 ============
+
+// 节点注册请求：携带机器自身信息，由 Server 分发 / 复用 agent_id。
+message RegisterRequest {
+  string hostname   = 1;
+  string machine_id = 2;   // 机器指纹（Linux /etc/machine-id；缺省回退 hostname）
+  string os         = 3;
+  string arch       = 4;
+  string kernel     = 5;
+  string version    = 6;   // Agent 构建版本（CARGO_PKG_VERSION）
+}
+
+message RegisterReply {
+  string agent_id    = 1;   // Server 分配：已注册过则复用历史 id，否则新建 UUID
+  string server_time = 2;
+}
+
+// ============ 服务 ============
+
+service Agent {
+  // 节点注册：Agent 启动时用自身机器信息换取（或复用）agent_id
+  rpc Register(RegisterRequest) returns (RegisterReply);
+  // 常规定时上报（默认 60s/批，即心跳）
+  rpc Push(MetricsBatch) returns (PushAck);
+  // 可选：长连接流式，实时性要求高时启用（阶段二插件分发复用此通道）
+  rpc Stream(stream MetricsBatch) returns (stream PushAck);
+}

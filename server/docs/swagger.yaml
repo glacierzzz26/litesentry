@@ -1,0 +1,579 @@
+basePath: /api
+definitions:
+  api.settingsView:
+    properties:
+      feishu_secret_set:
+        type: boolean
+      feishu_webhook:
+        type: string
+    type: object
+  store.Agent:
+    properties:
+      agent_id:
+        type: string
+      arch:
+        type: string
+      created_at:
+        type: string
+      hostname:
+        type: string
+      ipv4:
+        items:
+          $ref: '#/definitions/store.IPAddr'
+        type: array
+      ipv6:
+        items:
+          $ref: '#/definitions/store.IPAddr'
+        type: array
+      kernel:
+        type: string
+      last_seen:
+        type: string
+      os:
+        type: string
+      status:
+        description: Status 由 API 层计算（服务端权威）：online | offline，预留 upgrading 等扩展状态。
+        type: string
+      version:
+        description: Agent 构建版本（注册上报）
+        type: string
+    type: object
+  store.AlertEvent:
+    properties:
+      agent_id:
+        type: string
+      agent_name:
+        type: string
+      entity_id:
+        description: 容器规则 = 容器 id；主机/离线规则为空
+        type: string
+      entity_name:
+        description: 容器规则 = 容器名称
+        type: string
+      id:
+        type: string
+      metric:
+        type: string
+      notified_at:
+        type: string
+      resolved_at:
+        type: string
+      rule_id:
+        type: string
+      rule_name:
+        type: string
+      severity:
+        description: warning | critical
+        type: string
+      started_at:
+        type: string
+      state:
+        description: firing | resolved
+        type: string
+      threshold:
+        type: number
+      value:
+        type: number
+    type: object
+  store.AlertRule:
+    properties:
+      created_at:
+        type: string
+      duration_s:
+        description: 持续超过阈值多久才触发（秒），0 = 立即
+        type: integer
+      enabled:
+        type: boolean
+      id:
+        type: string
+      metric:
+        description: cpu_pct | mem_pct | load_1m | disk_pct | container_cpu | container_mem
+          | container_down | offline
+        type: string
+      name:
+        type: string
+      op:
+        description: '> | <'
+        type: string
+      severity:
+        description: warning | critical
+        type: string
+      threshold:
+        type: number
+      updated_at:
+        type: string
+    type: object
+  store.ContainerSample:
+    properties:
+      agent_id:
+        type: string
+      container_id:
+        type: string
+      cpu_pct:
+        type: number
+      image:
+        type: string
+      mem_limit:
+        type: integer
+      mem_usage:
+        type: integer
+      name:
+        type: string
+      net_rx_bps:
+        type: integer
+      net_tx_bps:
+        type: integer
+      restarts:
+        type: integer
+      state:
+        type: string
+      ts:
+        type: string
+      uptime_s:
+        type: integer
+    type: object
+  store.DiskSample:
+    properties:
+      agent_id:
+        type: string
+      fs:
+        type: string
+      mount:
+        type: string
+      total:
+        type: integer
+      ts:
+        type: string
+      used:
+        type: integer
+    type: object
+  store.HostSample:
+    properties:
+      agent_cpu_pct:
+        description: Agent 自身进程 CPU 占用（%）
+        type: number
+      agent_id:
+        type: string
+      agent_mem_rss:
+        description: Agent 自身 RSS（字节）
+        type: integer
+      arch:
+        type: string
+      cpu_pct:
+        type: number
+      hostname:
+        type: string
+      kernel:
+        type: string
+      load_1m:
+        type: number
+      load_5m:
+        type: number
+      mem_total:
+        type: integer
+      mem_used:
+        type: integer
+      net_rx_bps:
+        type: integer
+      net_tx_bps:
+        type: integer
+      os:
+        type: string
+      swap_total:
+        type: integer
+      swap_used:
+        type: integer
+      ts:
+        type: string
+      uptime_s:
+        type: integer
+    type: object
+  store.IPAddr:
+    properties:
+      addr:
+        type: string
+      family:
+        description: ipv4 | ipv6
+        type: string
+      iface:
+        type: string
+      scope:
+        description: global | link | loopback
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    name: litesentry
+    url: https://github.com/
+  description: 轻量主机 + 容器监控 Server REST 接口（前端面板取数）。Agent↔Server 走 gRPC，契约见 docs/proto.html。
+  termsOfService: http://localhost:8080/
+  title: litesentry API
+  version: 0.1.0
+paths:
+  /agents:
+    get:
+      description: 全部 Agent 最新状态，含 IPv4/IPv6 地址快照
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/store.Agent'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 节点列表
+      tags:
+      - 节点
+  /agents/{id}/containers:
+    get:
+      description: 某节点在窗口内各容器的状态与资源样本，按时间升序
+      parameters:
+      - description: Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 起始 unix 秒（默认 1 小时前）
+        in: query
+        name: from
+        type: integer
+      - description: 结束 unix 秒（默认当前）
+        in: query
+        name: to
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/store.ContainerSample'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 容器指标时序
+      tags:
+      - 时序
+  /agents/{id}/disks:
+    get:
+      description: 某节点在窗口内各挂载点的磁盘占用样本，按时间升序
+      parameters:
+      - description: Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 起始 unix 秒（默认 1 小时前）
+        in: query
+        name: from
+        type: integer
+      - description: 结束 unix 秒（默认当前）
+        in: query
+        name: to
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/store.DiskSample'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 磁盘指标时序
+      tags:
+      - 时序
+  /agents/{id}/host:
+    get:
+      description: 某节点在窗口内的主机样本（CPU/内存/负载/网络/系统信息），按时间升序
+      parameters:
+      - description: Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 起始 unix 秒（默认 1 小时前）
+        in: query
+        name: from
+        type: integer
+      - description: 结束 unix 秒（默认当前）
+        in: query
+        name: to
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/store.HostSample'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 主机指标时序
+      tags:
+      - 时序
+  /alerts/events:
+    get:
+      description: 按时间窗口查询，可按节点 / 状态过滤；默认最近 24h
+      parameters:
+      - description: 起始 unix 秒
+        in: query
+        name: from
+        type: integer
+      - description: 结束 unix 秒
+        in: query
+        name: to
+        type: integer
+      - description: 节点 ID
+        in: query
+        name: agent_id
+        type: string
+      - description: firing | resolved
+        in: query
+        name: state
+        type: string
+      - description: 条数（默认 100，最大 500）
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/store.AlertEvent'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 告警事件列表
+      tags:
+      - 告警
+  /alerts/rules:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/store.AlertRule'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 告警规则列表
+      tags:
+      - 告警
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 规则（id 忽略）
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/store.AlertRule'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/store.AlertRule'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 新建告警规则
+      tags:
+      - 告警
+  /alerts/rules/{id}:
+    delete:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 删除告警规则
+      tags:
+      - 告警
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 规则 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 规则（id 取自路径）
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/store.AlertRule'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/store.AlertRule'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 更新告警规则
+      tags:
+      - 告警
+  /health:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: status/time
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 健康检查
+      tags:
+      - 系统
+  /settings:
+    get:
+      description: 飞书 webhook 与 secret 是否存在（secret 不回显明文）
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.settingsView'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 读取设置
+      tags:
+      - 设置
+    put:
+      consumes:
+      - application/json
+      description: 更新飞书 webhook；secret 为空表示保留原值
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.settingsView'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 保存设置
+      tags:
+      - 设置
+  /settings/feishu-test:
+    post:
+      description: 按当前配置发送一条测试消息
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: 未配置或发送失败
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 测试飞书机器人
+      tags:
+      - 设置
+securityDefinitions:
+  BearerAuth:
+    description: Agent/前端共享 token，格式：Bearer <token>
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

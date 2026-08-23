@@ -1,0 +1,36 @@
+# litesentry Agent 守护单元：每台被监控主机安装。
+# 安装：
+#   1. 把 litesentry-agent 放到 /usr/local/bin/litesentry-agent
+#   2. 创建 /etc/litesentry/agent.env（见下方示例，0600 权限）
+#   3. cp deploy/litesentry-agent.service /etc/systemd/system/
+#   4. systemctl daemon-reload && systemctl enable --now litesentry-agent
+#
+# agent.env 示例：
+#   LS_SERVER=monitor.example.com:9000      # Server gRPC 地址（https 由证书触发）
+#   LS_TOKEN=<与 Server 一致的 Agent token>
+#   LS_TLS_CA=/etc/litesentry/ca.crt
+#   LS_TLS_CERT=/etc/litesentry/agent.crt
+#   LS_TLS_KEY=/etc/litesentry/agent.key
+#   LS_ID_FILE=/var/lib/litesentry/agent_id
+#   LS_INTERVAL=60
+
+[Unit]
+Description=litesentry Agent（主机/容器监控采集）
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/litesentry/agent.env
+ExecStart=/usr/local/bin/litesentry-agent
+Restart=always
+RestartSec=5
+# 基础加固（生产建议）：只允许写 agent_id 缓存目录
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/litesentry
+
+[Install]
+WantedBy=multi-user.target

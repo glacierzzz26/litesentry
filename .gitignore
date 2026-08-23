@@ -1,0 +1,30 @@
+# ---- 构建产物（make 生成）----
+bin/
+web/dist/
+server/internal/webui/dist/
+agent/target/
+
+# ---- 依赖 ----
+node_modules/
+web/node_modules/
+
+# ---- 本地开发数据 / 密钥 / 证书（不进版本库）----
+.dev/
+.env
+deploy/.env
+certs/
+deploy/certs/
+*.pem
+*.crt
+*.key
+
+# ---- 日志 / 缓存 ----
+*.log
+**/__pycache__/
+*.tsbuildinfo
+
+# ---- 编辑器 / 系统 ----
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store

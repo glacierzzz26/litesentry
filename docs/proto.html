@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <title>Protocol Documentation</title>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Ubuntu:400,700,400italic"/>
+    <style>
+      body {
+        width: 60em;
+        margin: 1em auto;
+        color: #222;
+        font-family: "Ubuntu", sans-serif;
+        padding-bottom: 4em;
+      }
+
+      h1 {
+        font-weight: normal;
+        border-bottom: 1px solid #aaa;
+        padding-bottom: 0.5ex;
+      }
+
+      h2 {
+        border-bottom: 1px solid #aaa;
+        padding-bottom: 0.5ex;
+        margin: 1.5em 0;
+      }
+
+      h3 {
+        font-weight: normal;
+        border-bottom: 1px solid #aaa;
+        padding-bottom: 0.5ex;
+      }
+
+      a {
+        text-decoration: none;
+        color: #567e25;
+      }
+
+      table {
+        width: 100%;
+        font-size: 80%;
+        border-collapse: collapse;
+      }
+
+      thead {
+        font-weight: 700;
+        background-color: #dcdcdc;
+      }
+
+      tbody tr:nth-child(even) {
+        background-color: #fbfbfb;
+      }
+
+      td {
+        border: 1px solid #ccc;
+        padding: 0.5ex 2ex;
+      }
+
+      td p {
+        text-indent: 1em;
+        margin: 0;
+      }
+
+      td p:nth-child(1) {
+        text-indent: 0;  
+      }
+
+       
+      .field-table td:nth-child(1) {  
+        width: 10em;
+      }
+      .field-table td:nth-child(2) {  
+        width: 10em;
+      }
+      .field-table td:nth-child(3) {  
+        width: 6em;
+      }
+      .field-table td:nth-child(4) {  
+        width: auto;
+      }
+
+       
+      .extension-table td:nth-child(1) {  
+        width: 10em;
+      }
+      .extension-table td:nth-child(2) {  
+        width: 10em;
+      }
+      .extension-table td:nth-child(3) {  
+        width: 10em;
+      }
+      .extension-table td:nth-child(4) {  
+        width: 5em;
+      }
+      .extension-table td:nth-child(5) {  
+        width: auto;
+      }
+
+       
+      .enum-table td:nth-child(1) {  
+        width: 10em;
+      }
+      .enum-table td:nth-child(2) {  
+        width: 10em;
+      }
+      .enum-table td:nth-child(3) {  
+        width: auto;
+      }
+
+       
+      .scalar-value-types-table tr {
+        height: 3em;
+      }
+
+       
+      #toc-container ul {
+        list-style-type: none;
+        padding-left: 1em;
+        line-height: 180%;
+        margin: 0;
+      }
+      #toc > li > a {
+        font-weight: bold;
+      }
+
+       
+      .file-heading {
+        width: 100%;
+        display: table;
+        border-bottom: 1px solid #aaa;
+        margin: 4em 0 1.5em 0;
+      }
+      .file-heading h2 {
+        border: none;
+        display: table-cell;
+      }
+      .file-heading a {
+        text-align: right;
+        display: table-cell;
+      }
+
+       
+      .badge {
+        width: 1.6em;
+        height: 1.6em;
+        display: inline-block;
+
+        line-height: 1.6em;
+        text-align: center;
+        font-weight: bold;
+        font-size: 60%;
+
+        color: #89ba48;
+        background-color: #dff0c8;
+
+        margin: 0.5ex 1em 0.5ex -1em;
+        border: 1px solid #fbfbfb;
+        border-radius: 1ex;
+      }
+    </style>
+
+    
+    <link rel="stylesheet" type="text/css" href="stylesheet.css"/>
+  </head>
+
+  <body>
+
+    <h1 id="title">Protocol Documentation</h1>
+
+    <h2>Table of Contents</h2>
+
+    <div id="toc-container">
+      <ul id="toc">
+        
+          
+          <li>
+            <a href="#litesentry.proto">litesentry.proto</a>
+            <ul>
+              
+                <li>
+                  <a href="#litesentry.ContainerMem"><span class="badge">M</span>ContainerMem</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.ContainerMetrics"><span class="badge">M</span>ContainerMetrics</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.Disk"><span class="badge">M</span>Disk</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.HostMetrics"><span class="badge">M</span>HostMetrics</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.IPAddr"><span class="badge">M</span>IPAddr</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.Mem"><span class="badge">M</span>Mem</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.MetricsBatch"><span class="badge">M</span>MetricsBatch</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.Net"><span class="badge">M</span>Net</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.PushAck"><span class="badge">M</span>PushAck</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.Series"><span class="badge">M</span>Series</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.Series.FieldsEntry"><span class="badge">M</span>Series.FieldsEntry</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.Series.TagsEntry"><span class="badge">M</span>Series.TagsEntry</a>
+                </li>
+              
+              
+              
+              
+                <li>
+                  <a href="#litesentry.Agent"><span class="badge">S</span>Agent</a>
+                </li>
+              
+            </ul>
+          </li>
+        
+        <li><a href="#scalar-value-types">Scalar Value Types</a></li>
+      </ul>
+    </div>
+
+    
+      
+      <div class="file-heading">
+        <h2 id="litesentry.proto">litesentry.proto</h2><a href="#title">Top</a>
+      </div>
+      <p>litesentry 数据契约（唯一 proto 源）</p><p>阶段一：Agent 定时上报主机 + 容器指标。</p><p>- 通信走 IPv4，Agent 通过 gRPC metadata 携带 token（证书 TLS/mTLS 预留，</p><p>测试阶段明文联调，上线前启用）。</p><p>- Series 通用字段已预留，阶段二插件化直接启用。</p>
+
+      
+        <h3 id="litesentry.ContainerMem">ContainerMem</h3>
+        <p>容器内存（usage/limit，区别于主机的 total/used）</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>usage</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>limit</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="litesentry.ContainerMetrics">ContainerMetrics</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>name</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>image</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>state</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>restarts</td>
+                  <td><a href="#uint32">uint32</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>uptime_s</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>cpu_pct</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>mem</td>
+                  <td><a href="#litesentry.ContainerMem">ContainerMem</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>net</td>
+                  <td><a href="#litesentry.Net">Net</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="litesentry.Disk">Disk</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>mount</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>fs</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>total</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>used</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="litesentry.HostMetrics">HostMetrics</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>hostname</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>os</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>arch</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>kernel</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>uptime_s</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>load_1m</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>load_5m</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>cpu_pct</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>mem</td>
+                  <td><a href="#litesentry.Mem">Mem</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>swap</td>
+                  <td><a href="#litesentry.Mem">Mem</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>disks</td>
+                  <td><a href="#litesentry.Disk">Disk</a></td>
+                  <td>repeated</td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>net</td>
+                  <td><a href="#litesentry.Net">Net</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>ips</td>
+                  <td><a href="#litesentry.IPAddr">IPAddr</a></td>
+                  <td>repeated</td>
+                  <td><p>IPv4 &#43; IPv6 全量地址 </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="litesentry.IPAddr">IPAddr</h3>
+        <p>网卡地址（IPv4 / IPv6，含 iface 与 scope）</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>family</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>ipv4 | ipv6 </p></td>
+                </tr>
+              
+                <tr>
+                  <td>addr</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>iface</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>scope</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>global | link | loopback </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="litesentry.Mem">Mem</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>total</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>used</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="litesentry.MetricsBatch">MetricsBatch</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>agent_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>ts</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p>unix 秒 </p></td>
+                </tr>
+              
+                <tr>
+                  <td>host</td>
+                  <td><a href="#litesentry.HostMetrics">HostMetrics</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>containers</td>
+                  <td><a href="#litesentry.ContainerMetrics">ContainerMetrics</a></td>
+                  <td>repeated</td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>series</td>
+                  <td><a href="#litesentry.Series">Series</a></td>
+                  <td>repeated</td>
+                  <td><p>阶段二启用，阶段一不填充 </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="litesentry.Net">Net</h3>
+        <p>网络速率（前后两采样差分得到）</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>rx_bps</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>tx_bps</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="litesentry.PushAck">PushAck</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>server_time</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>message</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="litesentry.Series">Series</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>name</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>e.g. &#34;postgres.connections&#34; </p></td>
+                </tr>
+              
+                <tr>
+                  <td>tags</td>
+                  <td><a href="#litesentry.Series.TagsEntry">Series.TagsEntry</a></td>
+                  <td>repeated</td>
+                  <td><p>维度: instance, db... </p></td>
+                </tr>
+              
+                <tr>
+                  <td>fields</td>
+                  <td><a href="#litesentry.Series.FieldsEntry">Series.FieldsEntry</a></td>
+                  <td>repeated</td>
+                  <td><p>指标: active=12 </p></td>
+                </tr>
+              
+                <tr>
+                  <td>ts</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="litesentry.Series.FieldsEntry">Series.FieldsEntry</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>key</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>value</td>
+                  <td><a href="#double">double</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="litesentry.Series.TagsEntry">Series.TagsEntry</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>key</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>value</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+
+      
+
+      
+
+      
+        <h3 id="litesentry.Agent">Agent</h3>
+        <p></p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Method Name</td><td>Request Type</td><td>Response Type</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>Push</td>
+                <td><a href="#litesentry.MetricsBatch">MetricsBatch</a></td>
+                <td><a href="#litesentry.PushAck">PushAck</a></td>
+                <td><p>常规定时上报（10s/批）</p></td>
+              </tr>
+            
+              <tr>
+                <td>Stream</td>
+                <td><a href="#litesentry.MetricsBatch">MetricsBatch</a> stream</td>
+                <td><a href="#litesentry.PushAck">PushAck</a> stream</td>
+                <td><p>可选：长连接流式，实时性要求高时启用（阶段二插件分发复用此通道）</p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+
+        
+    
+
+    <h2 id="scalar-value-types">Scalar Value Types</h2>
+    <table class="scalar-value-types-table">
+      <thead>
+        <tr><td>.proto Type</td><td>Notes</td><td>C++</td><td>Java</td><td>Python</td><td>Go</td><td>C#</td><td>PHP</td><td>Ruby</td></tr>
+      </thead>
+      <tbody>
+        
+          <tr id="double">
+            <td>double</td>
+            <td></td>
+            <td>double</td>
+            <td>double</td>
+            <td>float</td>
+            <td>float64</td>
+            <td>double</td>
+            <td>float</td>
+            <td>Float</td>
+          </tr>
+        
+          <tr id="float">
+            <td>float</td>
+            <td></td>
+            <td>float</td>
+            <td>float</td>
+            <td>float</td>
+            <td>float32</td>
+            <td>float</td>
+            <td>float</td>
+            <td>Float</td>
+          </tr>
+        
+          <tr id="int32">
+            <td>int32</td>
+            <td>Uses variable-length encoding. Inefficient for encoding negative numbers – if your field is likely to have negative values, use sint32 instead.</td>
+            <td>int32</td>
+            <td>int</td>
+            <td>int</td>
+            <td>int32</td>
+            <td>int</td>
+            <td>integer</td>
+            <td>Bignum or Fixnum (as required)</td>
+          </tr>
+        
+          <tr id="int64">
+            <td>int64</td>
+            <td>Uses variable-length encoding. Inefficient for encoding negative numbers – if your field is likely to have negative values, use sint64 instead.</td>
+            <td>int64</td>
+            <td>long</td>
+            <td>int/long</td>
+            <td>int64</td>
+            <td>long</td>
+            <td>integer/string</td>
+            <td>Bignum</td>
+          </tr>
+        
+          <tr id="uint32">
+            <td>uint32</td>
+            <td>Uses variable-length encoding.</td>
+            <td>uint32</td>
+            <td>int</td>
+            <td>int/long</td>
+            <td>uint32</td>
+            <td>uint</td>
+            <td>integer</td>
+            <td>Bignum or Fixnum (as required)</td>
+          </tr>
+        
+          <tr id="uint64">
+            <td>uint64</td>
+            <td>Uses variable-length encoding.</td>
+            <td>uint64</td>
+            <td>long</td>
+            <td>int/long</td>
+            <td>uint64</td>
+            <td>ulong</td>
+            <td>integer/string</td>
+            <td>Bignum or Fixnum (as required)</td>
+          </tr>
+        
+          <tr id="sint32">
+            <td>sint32</td>
+            <td>Uses variable-length encoding. Signed int value. These more efficiently encode negative numbers than regular int32s.</td>
+            <td>int32</td>
+            <td>int</td>
+            <td>int</td>
+            <td>int32</td>
+            <td>int</td>
+            <td>integer</td>
+            <td>Bignum or Fixnum (as required)</td>
+          </tr>
+        
+          <tr id="sint64">
+            <td>sint64</td>
+            <td>Uses variable-length encoding. Signed int value. These more efficiently encode negative numbers than regular int64s.</td>
+            <td>int64</td>
+            <td>long</td>
+            <td>int/long</td>
+            <td>int64</td>
+            <td>long</td>
+            <td>integer/string</td>
+            <td>Bignum</td>
+          </tr>
+        
+          <tr id="fixed32">
+            <td>fixed32</td>
+            <td>Always four bytes. More efficient than uint32 if values are often greater than 2^28.</td>
+            <td>uint32</td>
+            <td>int</td>
+            <td>int</td>
+            <td>uint32</td>
+            <td>uint</td>
+            <td>integer</td>
+            <td>Bignum or Fixnum (as required)</td>
+          </tr>
+        
+          <tr id="fixed64">
+            <td>fixed64</td>
+            <td>Always eight bytes. More efficient than uint64 if values are often greater than 2^56.</td>
+            <td>uint64</td>
+            <td>long</td>
+            <td>int/long</td>
+            <td>uint64</td>
+            <td>ulong</td>
+            <td>integer/string</td>
+            <td>Bignum</td>
+          </tr>
+        
+          <tr id="sfixed32">
+            <td>sfixed32</td>
+            <td>Always four bytes.</td>
+            <td>int32</td>
+            <td>int</td>
+            <td>int</td>
+            <td>int32</td>
+            <td>int</td>
+            <td>integer</td>
+            <td>Bignum or Fixnum (as required)</td>
+          </tr>
+        
+          <tr id="sfixed64">
+            <td>sfixed64</td>
+            <td>Always eight bytes.</td>
+            <td>int64</td>
+            <td>long</td>
+            <td>int/long</td>
+            <td>int64</td>
+            <td>long</td>
+            <td>integer/string</td>
+            <td>Bignum</td>
+          </tr>
+        
+          <tr id="bool">
+            <td>bool</td>
+            <td></td>
+            <td>bool</td>
+            <td>boolean</td>
+            <td>boolean</td>
+            <td>bool</td>
+            <td>bool</td>
+            <td>boolean</td>
+            <td>TrueClass/FalseClass</td>
+          </tr>
+        
+          <tr id="string">
+            <td>string</td>
+            <td>A string must always contain UTF-8 encoded or 7-bit ASCII text.</td>
+            <td>string</td>
+            <td>String</td>
+            <td>str/unicode</td>
+            <td>string</td>
+            <td>string</td>
+            <td>string</td>
+            <td>String (UTF-8)</td>
+          </tr>
+        
+          <tr id="bytes">
+            <td>bytes</td>
+            <td>May contain any arbitrary sequence of bytes.</td>
+            <td>string</td>
+            <td>ByteString</td>
+            <td>str</td>
+            <td>[]byte</td>
+            <td>ByteString</td>
+            <td>string</td>
+            <td>String (ASCII-8BIT)</td>
+          </tr>
+        
+      </tbody>
+    </table>
+  </body>
+</html>
+

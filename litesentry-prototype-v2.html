@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>litesentry · 主机容器监控平台</title>
+<style>
+  :root{
+    --bg:#f0f2f5; --panel:#ffffff; --panel-2:#fafbfc; --border:#e8e8ec; --border-2:#f0f0f3;
+    --text:#1f2329; --muted:#8a9099; --faint:#aeb4bd;
+    --primary:#2a78d6; --primary-bg:#eaf2fc; --primary-hover:#1f66bf;
+    --ok:#52c41a; --warn:#faad14; --danger:#ff4d4f;
+    --chart-grid:#eef0f3; --shadow:0 1px 2px rgba(0,0,0,.04),0 2px 8px rgba(0,0,0,.05);
+    --logo-grad:linear-gradient(135deg,#2a78d6,#5aa0ec);
+    --login-bg:linear-gradient(135deg,#eef4fb,#f5f7fa);
+  }
+  [data-theme="dark"]{
+    --bg:#0f1115; --panel:#161a20; --panel-2:#1b2027; --border:#232831; --border-2:#2a2f38;
+    --text:#e6e9ef; --muted:#8b93a1; --faint:#5b6371;
+    --primary:#5aa0ec; --primary-bg:rgba(90,160,236,.12); --primary-hover:#7ab5f5;
+    --ok:#34d399; --warn:#fbbf24; --danger:#f87171;
+    --chart-grid:#232831; --shadow:0 1px 2px rgba(0,0,0,.2),0 2px 8px rgba(0,0,0,.15);
+    --logo-grad:linear-gradient(135deg,#2a78d6,#5aa0ec);
+    --login-bg:linear-gradient(135deg,#0a0c10,#161a20);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Inter','Segoe UI',PingFangSC,'PingFang SC',-apple-system,BlinkMacSystemFont,'Microsoft YaHei',sans-serif;font-size:15px;line-height:1.6;letter-spacing:.1px;font-feature-settings:"cv11","ss01";-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;transition:background .2s,color .2s}
+  .mono{font-family:'SFMono-Regular',ui-monospace,Menlo,Consolas,'Roboto Mono',monospace;font-variant-numeric:tabular-nums}
+
+  /* sidebar */
+  .sidebar{position:fixed;left:0;top:0;bottom:0;width:232px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;transition:width .18s,background .2s;z-index:10}
+  .sidebar.collapsed{width:64px}
+  .brand{display:flex;align-items:center;gap:10px;padding:0 18px;height:56px;border-bottom:1px solid var(--border-2);font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden}
+  .brand .logo{width:28px;height:28px;border-radius:8px;background:var(--logo-grad);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;flex-shrink:0;box-shadow:var(--shadow)}
+  .sidebar.collapsed .brand .txt{opacity:0;width:0}
+  .brand .txt{transition:.18s;white-space:nowrap}
+  nav{display:flex;flex-direction:column;padding:10px 12px;gap:2px;flex:1;overflow:auto}
+  nav a{padding:10px 13px;border-radius:8px;color:var(--muted);cursor:pointer;text-decoration:none;font-size:14.5px;display:flex;align-items:center;gap:11px;white-space:nowrap;overflow:hidden;transition:.12s}
+  nav a .ico{width:18px;text-align:center;flex-shrink:0;font-size:15px}
+  nav a:hover{background:var(--panel-2);color:var(--text)}
+  nav a.active{background:var(--primary-bg);color:var(--primary);font-weight:500}
+  .sidebar.collapsed a .txt{opacity:0;width:0}
+  a .txt{transition:.18s;white-space:nowrap}
+  .side-foot{padding:10px 12px;border-top:1px solid var(--border-2)}
+  .coll-btn{width:100%;padding:7px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--muted);cursor:pointer;font-size:12px;text-align:center}
+  .coll-btn:hover{color:var(--primary);border-color:var(--primary)}
+
+  /* topbar */
+  .topbar{margin-left:232px;height:56px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 22px;position:sticky;top:0;z-index:5;transition:margin .18s,background .2s}
+  .sidebar.collapsed ~ .topbar{margin-left:64px}
+  .topbar h1{font-size:16px;font-weight:600}
+  .topbar .right{margin-left:auto;display:flex;align-items:center;gap:14px}
+  .status-dot{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--muted)}
+  .status-dot i{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(82,196,26,.15)}
+  .icon-btn{width:34px;height:34px;border-radius:8px;border:1px solid var(--border);background:var(--panel);color:var(--muted);cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;transition:.12s}
+  .icon-btn:hover{color:var(--primary);border-color:var(--primary)}
+  .user{display:flex;align-items:center;gap:9px;font-size:13px}
+  .avatar{width:30px;height:30px;border-radius:50%;background:var(--logo-grad);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600}
+
+  main{margin-left:232px;padding:22px;transition:margin .18s;min-width:0}
+  .sidebar.collapsed ~ main{margin-left:64px}
+  .page{display:none}
+  .page.active{display:block;animation:fade .16s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:18px;box-shadow:var(--shadow);transition:background .2s,border .2s}
+  .card.hover:hover{border-color:var(--primary)}
+  .card h3{font-size:14px;font-weight:600;color:var(--muted);margin-bottom:14px;display:flex;align-items:center;gap:8px;letter-spacing:.2px}
+  .grid{display:grid;gap:16px;min-width:0}
+  .cols-3{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+  .cols-4{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+
+  .stat{cursor:pointer;transition:.12s}
+  .stat:hover{border-color:var(--primary);transform:translateY(-1px)}
+  .stat .top{display:flex;align-items:center;justify-content:space-between}
+  .stat .ico{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px}
+  .stat .l{color:var(--muted);font-size:14px;margin-top:10px}
+  .stat .v{font-size:30px;font-weight:600;margin-top:4px;letter-spacing:.3px}
+  .stat .v small{font-size:14px;color:var(--muted);font-weight:400}
+
+  .node-head{display:flex;align-items:flex-start;justify-content:space-between;cursor:pointer}
+  .node-name{font-size:16px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .node-sub{color:var(--faint);font-size:12px;margin-top:3px}
+  .led{width:9px;height:9px;border-radius:50%;display:inline-block;flex-shrink:0}
+  .led.on{background:var(--ok);box-shadow:0 0 0 3px rgba(82,196,26,.18)}
+  .led.warn{background:var(--warn);box-shadow:0 0 0 3px rgba(250,173,20,.18)}
+  .led.off{background:var(--faint)}
+  .metrics{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+  .metric .lab{color:var(--faint);font-size:11.5px;text-transform:uppercase;letter-spacing:.5px}
+  .metric .val{font-size:23px;font-weight:600;margin-top:2px}
+  .spark{margin-top:6px;height:30px;width:100%}
+
+  .table-card{padding:0;overflow:hidden}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:13px 16px;border-bottom:1px solid var(--border-2)}
+  th{color:var(--muted);font-weight:600;font-size:12.5px;background:var(--panel-2);letter-spacing:.3px}
+  tbody tr:hover{background:var(--panel-2)}
+  tbody tr:last-child td{border-bottom:none}
+  .tag{display:inline-block;padding:2px 10px;border-radius:11px;font-size:12px;font-weight:500}
+  .tag.ok{background:rgba(82,196,26,.14);color:var(--ok)}
+  .tag.run{background:var(--primary-bg);color:var(--primary)}
+  .tag.warn{background:rgba(250,173,20,.16);color:var(--warn)}
+  .tag.down{background:rgba(255,77,79,.14);color:var(--danger)}
+  .tag.crit{background:rgba(255,77,79,.18);color:var(--danger)}
+  .copy{background:none;border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:3px 9px;cursor:pointer;font-size:11px}
+  .copy:hover{color:var(--primary);border-color:var(--primary)}
+  .link{color:var(--primary);cursor:pointer}
+  .link:hover{text-decoration:underline}
+
+  .cell{display:flex;align-items:center;gap:10px}
+  .cell .num{font-family:'SFMono-Regular',ui-monospace,Menlo,Consolas,monospace;font-weight:600;min-width:42px}
+  .meter{flex:1;height:6px;min-width:70px;border-radius:3px;background:var(--border-2);overflow:hidden}
+  .meter > i{display:block;height:100%;border-radius:3px;transition:width .3s}
+
+  .page-head{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+  .page-head h2{font-size:22px;font-weight:600;letter-spacing:.2px}
+  .back{color:var(--muted);cursor:pointer;font-size:13.5px}
+  .back:hover{color:var(--primary)}
+  .seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--panel)}
+  .seg button{background:var(--panel);border:none;color:var(--muted);padding:7px 16px;cursor:pointer;font-size:13.5px}
+  .seg button.active{background:var(--primary-bg);color:var(--primary);font-weight:500}
+  .chart{width:100%;height:150px;display:block}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;font-size:13px}
+  .kv .k{color:var(--muted)}
+
+  .alert-bar{display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:8px;margin-bottom:14px;font-size:13px}
+  .alert-bar.firing{background:rgba(255,77,79,.10);border:1px solid rgba(255,77,79,.3);color:var(--danger)}
+  .section-title{font-size:16px;font-weight:600;margin:24px 0 14px;display:flex;align-items:center;gap:8px;letter-spacing:.2px}
+  .section-title:first-child{margin-top:0}
+
+  .field{margin-bottom:16px}
+  .field label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+  .field input{width:100%;padding:10px 13px;border:1px solid var(--border);border-radius:8px;font-size:15px;outline:none;background:var(--panel);color:var(--text)}
+  .field input:focus{border-color:var(--primary)}
+  .btn{background:var(--primary);color:#fff;border:none;padding:10px 22px;border-radius:8px;cursor:pointer;font-size:15px;font-weight:500}
+  .btn:hover{background:var(--primary-hover)}
+  .btn.ghost{background:var(--panel);color:var(--text);border:1px solid var(--border)}
+  .btn.ghost:hover{border-color:var(--primary);color:var(--primary)}
+  .btn.sm{padding:5px 12px;font-size:12px}
+
+  .login-wrap{position:fixed;inset:0;background:var(--login-bg);display:flex;align-items:center;justify-content:center;transition:background .2s}
+  .login-card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:34px 32px;width:360px;box-shadow:0 8px 30px rgba(0,0,0,.1)}
+  .login-card .brand{justify-content:center;height:auto;border:none;margin-bottom:6px;font-size:18px;padding:0}
+  .login-card .sub{text-align:center;color:var(--muted);font-size:13px;margin-bottom:24px}
+
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--panel);padding:10px 18px;border-radius:8px;font-size:13px;opacity:0;transition:.2s;pointer-events:none;z-index:99}
+  .toast.show{opacity:1}
+  .muted{color:var(--muted)}
+  .switch{position:relative;width:38px;height:22px;background:var(--border);border-radius:11px;cursor:pointer;transition:.15s;display:inline-block;vertical-align:middle;flex-shrink:0}
+  .switch.on{background:var(--primary)}
+  .switch::after{content:"";position:absolute;width:18px;height:18px;border-radius:50%;background:#fff;top:2px;left:2px;transition:.15s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+  .switch.on::after{left:18px}
+
+  /* responsive: narrow screens */
+  @media (max-width:820px){
+    .sidebar{width:64px}
+    .sidebar .brand .txt,.sidebar nav a .txt,.side-foot .coll-btn{display:none}
+    .sidebar .brand{justify-content:center;padding:0}
+    .topbar,.topbar{margin-left:64px}
+    main{margin-left:64px;padding:14px}
+    .grid{grid-template-columns:1fr !important}
+    .cols-3,.cols-4{grid-template-columns:1fr}
+    .table-card{overflow-x:auto}
+    table{min-width:680px}
+  }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div class="login-wrap" id="loginView">
+  <div class="login-card">
+    <div class="brand"><span class="logo">L</span><span class="txt">litesentry</span></div>
+    <div class="sub">轻量主机 · 容器监控平台</div>
+    <div class="field"><label>用户名</label><input value="admin" /></div>
+    <div class="field"><label>密码</label><input type="password" value="admin123" /></div>
+    <button class="btn" style="width:100%" onclick="doLogin()">登录</button>
+    <div class="muted" style="font-size:12px;margin-top:14px;text-align:center">原型演示 · 任意账号可进入</div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="appView" style="display:none">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><span class="logo">L</span><span class="txt">litesentry</span></div>
+    <nav id="nav">
+      <a data-page="overview" class="active"><span class="ico">▦</span><span class="txt">总览</span></a>
+      <a data-page="hosts"><span class="ico">▤</span><span class="txt">主机</span></a>
+      <a data-page="containers"><span class="ico">▢</span><span class="txt">容器</span></a>
+      <a data-page="alerts"><span class="ico">⚠</span><span class="txt">告警事件</span></a>
+      <a data-page="rules"><span class="ico">⚙</span><span class="txt">告警规则</span></a>
+      <a data-page="settings"><span class="ico">⚒</span><span class="txt">设置</span></a>
+    </nav>
+    <div class="side-foot"><button class="coll-btn" onclick="toggleSide()">⟨ 折叠</button></div>
+  </aside>
+
+  <div class="topbar">
+    <h1 id="pageTitle">总览</h1>
+    <div class="right">
+      <span class="status-dot"><i></i> 3/4 在线</span>
+      <button class="icon-btn" id="themeBtn" onclick="toggleTheme()" title="切换主题">🌙</button>
+      <span class="user"><span class="avatar">A</span> admin</span>
+      <span class="link" style="font-size:13px" onclick="doLogout()">退出</span>
+    </div>
+  </div>
+
+  <main>
+    <!-- OVERVIEW -->
+    <section class="page active" id="overview">
+      <div class="grid cols-4" id="ovStats"></div>
+      <div class="section-title">主机</div>
+      <div class="grid cols-3" id="ovHosts"></div>
+      <div class="section-title">最近告警</div>
+      <div class="card table-card"><table id="ovAlerts"><thead><tr><th>级别</th><th>规则</th><th>节点</th><th>指标</th><th>值 / 阈值</th><th>开始</th></tr></thead><tbody></tbody></table></div>
+    </section>
+
+    <!-- HOSTS -->
+    <section class="page" id="hosts">
+      <div class="section-title" style="margin-top:0">主机列表</div>
+      <div class="card table-card"><table id="hostTable"><thead><tr><th>状态</th><th>主机</th><th>系统</th><th>版本</th><th>CPU</th><th>内存</th><th>磁盘</th><th>负载</th><th>Agent 开销</th></tr></thead><tbody></tbody></table></div>
+    </section>
+
+    <!-- AGENT DETAIL -->
+    <section class="page" id="agent">
+      <div class="page-head">
+        <span class="back" onclick="go('hosts')">← 主机</span>
+        <h2 id="agName">node-alpha</h2><span class="led on" id="agLed"></span>
+        <div class="seg" style="margin-left:10px" id="agRange">
+          <button class="active" data-r="1h">1h</button><button data-r="6h">6h</button><button data-r="24h">24h</button><button data-r="7d">7d</button>
+        </div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
+        <div class="card"><h3>CPU 使用率 %</h3><svg class="chart" id="agCpu"></svg></div>
+        <div class="card"><h3>内存使用 %</h3><svg class="chart" id="agMem"></svg></div>
+        <div class="card"><h3>网络 入/出 (Mbps)</h3><svg class="chart" id="agNet"></svg></div>
+        <div class="card"><h3>系统负载 1m</h3><svg class="chart" id="agLoad"></svg></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
+        <div class="card"><h3>磁盘占用</h3><div id="agDisk"></div></div>
+        <div class="card"><h3>Agent 自身开销</h3><div class="kv" id="agSelf"></div></div>
+      </div>
+      <div class="section-title">容器</div>
+      <div class="card table-card"><table id="agCont"><thead><tr><th>名称</th><th>镜像</th><th>状态</th><th>重启</th><th>CPU</th><th>内存</th><th>网络 ↑/↓</th></tr></thead><tbody></tbody></table></div>
+      <div class="section-title">地址（IPv4 / IPv6）</div>
+      <div class="card table-card"><table id="agAddr"><thead><tr><th>网卡</th><th>类型</th><th>地址</th><th></th></tr></thead><tbody></tbody></table></div>
+    </section>
+
+    <!-- CONTAINERS -->
+    <section class="page" id="containers">
+      <div class="section-title" style="margin-top:0">容器（跨节点）</div>
+      <div class="card table-card"><table id="contTable"><thead><tr><th>节点</th><th>名称</th><th>镜像</th><th>状态</th><th>重启</th><th>CPU</th><th>内存</th><th>网络 ↑/↓</th></tr></thead><tbody></tbody></table></div>
+    </section>
+
+    <!-- CONTAINER DETAIL -->
+    <section class="page" id="container">
+      <div class="page-head"><span class="back" onclick="go('containers')">← 容器</span><h2 id="cdName">worker-1</h2><span class="tag run" id="cdState">running</span></div>
+      <div class="kv" style="margin-bottom:16px"><div class="k">节点</div><div id="cdNode" class="mono">node-gamma</div><div class="k">镜像</div><div id="cdImg" class="mono">myapp/worker</div><div class="k">重启</div><div id="cdRestarts" class="mono">0</div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
+        <div class="card"><h3>CPU %</h3><svg class="chart" id="cdCpu"></svg></div>
+        <div class="card"><h3>内存</h3><svg class="chart" id="cdMem"></svg></div>
+      </div>
+    </section>
+
+    <!-- ALERTS -->
+    <section class="page" id="alerts">
+      <div class="alert-bar firing">● 2 条告警持续中，请关注 node-gamma / node-beta</div>
+      <div class="section-title" style="margin-top:0">告警事件</div>
+      <div class="card table-card"><table id="alertTable"><thead><tr><th>级别</th><th>规则</th><th>节点 / 实体</th><th>指标</th><th>值 / 阈值</th><th>状态</th><th>开始</th></tr></thead><tbody></tbody></table></div>
+    </section>
+
+    <!-- RULES -->
+    <section class="page" id="rules">
+      <div class="page-head"><h2 style="font-size:16px">告警规则</h2><button class="btn sm" style="margin-left:auto" onclick="toast('新建规则（占位）')">+ 新建</button></div>
+      <div class="card table-card"><table id="ruleTable"><thead><tr><th>名称</th><th>指标</th><th>条件</th><th>持续</th><th>级别</th><th>启用</th></tr></thead><tbody></tbody></table></div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="page" id="settings">
+      <div class="section-title" style="margin-top:0">用户管理</div>
+      <div class="card table-card"><table id="userTable"><thead><tr><th>用户名</th><th>显示名</th><th>角色</th><th>最后登录</th><th></th></tr></thead><tbody></tbody></table></div>
+      <div class="section-title">飞书机器人</div>
+      <div class="card" style="max-width:520px">
+        <div class="field"><label>Webhook 地址</label><input value="https://open.feishu.cn/open-apis/bot/v2/hook/****" /></div>
+        <div class="field"><label>签名密钥 (Secret)</label><input type="password" value="****************" /></div>
+        <div style="display:flex;gap:10px"><button class="btn" onclick="toast('已保存（占位）')">保存</button><button class="btn ghost" onclick="toast('测试消息已发送（占位）')">发送测试</button></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ---------- data ----------
+const NODES=[
+ {id:'node-alpha',name:'node-alpha',version:'v0.4.1',os:'Ubuntu 24.04',arch:'x86_64',led:'on',cpu:18,mem:62,disk:47,load:0.42,uptime:'23d 14h',agentCpu:0.6,agentRss:'9.2 MiB',
+  cpuS:[12,15,14,18,22,19,17,20,24,21,18,16,19,23,20,18],memS:[58,60,59,62,64,61,60,63,65,62,61,60,62,64,63,62],loadS:[0.3,0.35,0.4,0.38,0.42,0.45,0.41,0.39,0.44,0.43,0.4,0.42,0.41,0.43,0.42,0.42]},
+ {id:'node-beta',name:'node-beta',version:'v0.4.1',os:'Debian 12',arch:'x86_64',led:'on',cpu:71,mem:83,disk:91,load:2.1,uptime:'9d 03h',agentCpu:0.7,agentRss:'9.8 MiB',
+  cpuS:[55,60,64,68,72,70,66,71,74,73,69,71,72,70,71,71],memS:[78,80,79,82,84,83,81,83,85,84,82,83,84,83,82,83],loadS:[1.6,1.8,1.9,2.0,2.1,2.0,1.9,2.1,2.2,2.1,2.0,2.1,2.0,2.1,2.1,2.1]},
+ {id:'node-gamma',name:'node-gamma',version:'v0.4.0',os:'Ubuntu 22.04',arch:'aarch64',led:'warn',cpu:96,mem:77,disk:33,load:5.8,uptime:'41d 09h',agentCpu:0.9,agentRss:'10.4 MiB',
+  cpuS:[80,85,88,90,93,95,92,94,96,95,97,96,94,95,96,96],memS:[70,72,74,73,75,76,77,76,78,77,76,77,78,77,76,77],loadS:[4.2,4.5,4.8,5.0,5.2,5.5,5.3,5.6,5.8,5.7,5.5,5.8,5.6,5.7,5.8,5.8]},
+ {id:'node-delta',name:'node-delta',version:'—',os:'CentOS 9',arch:'x86_64',led:'off',cpu:0,mem:0,disk:0,load:0,uptime:'—',agentCpu:0,agentRss:'—',
+  cpuS:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],memS:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],loadS:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},
+];
+const CONTAINERS=[
+ {node:'node-alpha',name:'redis',image:'redis:7.2',state:'running',restarts:0,cpu:3.2,mem:'142 MiB',net:'0.4 / 0.2'},
+ {node:'node-alpha',name:'postgres',image:'postgres:16',state:'running',restarts:1,cpu:8.1,mem:'512 MiB',net:'1.2 / 0.9'},
+ {node:'node-alpha',name:'nginx',image:'nginx:1.27',state:'running',restarts:0,cpu:1.4,mem:'24 MiB',net:'2.1 / 3.4'},
+ {node:'node-beta',name:'grafana',image:'grafana:11',state:'running',restarts:2,cpu:11.3,mem:'188 MiB',net:'0.8 / 0.6'},
+ {node:'node-beta',name:'prometheus',image:'prom/prometheus',state:'running',restarts:0,cpu:22.7,mem:'1.1 GiB',net:'0.5 / 1.8'},
+ {node:'node-beta',name:'alertmanager',image:'prom/alertmanager',state:'running',restarts:0,cpu:2.0,mem:'36 MiB',net:'0.1 / 0.1'},
+ {node:'node-gamma',name:'minio',image:'minio/minio',state:'running',restarts:4,cpu:14.5,mem:'320 MiB',net:'4.2 / 5.1'},
+ {node:'node-gamma',name:'worker-1',image:'myapp/worker',state:'running',restarts:0,cpu:61.2,mem:'780 MiB',net:'1.1 / 0.7'},
+ {node:'node-gamma',name:'worker-2',image:'myapp/worker',state:'restarting',restarts:17,cpu:0,mem:'0 B',net:'0 / 0'},
+ {node:'node-gamma',name:'cache',image:'valkey:8',state:'running',restarts:1,cpu:5.6,mem:'96 MiB',net:'0.3 / 0.3'},
+ {node:'node-delta',name:'—',image:'—',state:'down',restarts:0,cpu:0,mem:'0 B',net:'0 / 0'},
+];
+const ADDRS={
+ 'node-alpha':[{iface:'eth0',fam:'IPv4',addr:'10.0.4.21'},{iface:'eth0',fam:'IPv6',addr:'2408:400a:1f2:3c::21'},{iface:'eth1',fam:'IPv4',addr:'192.168.1.21'}],
+ 'node-beta':[{iface:'ens3',fam:'IPv4',addr:'10.0.4.47'},{iface:'ens3',fam:'IPv6',addr:'2408:400a:1f2:3c::47'}],
+ 'node-gamma':[{iface:'eth0',fam:'IPv4',addr:'10.0.8.12'},{iface:'eth0',fam:'IPv6',addr:'2408:400a:9a1:7d::12'},{iface:'docker0',fam:'IPv4',addr:'172.17.0.1'}],
+ 'node-delta':[],
+};
+const ALERTS=[
+ {sev:'critical',rule:'CPU 使用率',node:'node-gamma',entity:'node-gamma',metric:'cpu_pct',val:'96%',th:'>90%',state:'firing',start:'14:02'},
+ {sev:'warning',rule:'磁盘占用',node:'node-beta',entity:'/',metric:'disk_pct',val:'91%',th:'>90%',state:'firing',start:'09:31'},
+ {sev:'warning',rule:'容器异常重启',node:'node-gamma',entity:'worker-2',metric:'container_down',val:'17次',th:'>5',state:'firing',start:'11:48'},
+];
+const RULES=[
+ {name:'CPU 使用率过高',metric:'cpu_pct',op:'>',th:90,dur:300,sev:'critical',on:true},
+ {name:'内存使用率过高',metric:'mem_pct',op:'>',th:85,dur:300,sev:'warning',on:true},
+ {name:'磁盘空间不足',metric:'disk_pct',op:'>',th:90,dur:600,sev:'warning',on:true},
+ {name:'系统负载过高',metric:'load_1m',op:'>',th:4,dur:300,sev:'warning',on:true},
+ {name:'容器异常重启',metric:'container_down',op:'>',th:5,dur:0,sev:'warning',on:true},
+ {name:'节点离线',metric:'offline',op:'>',th:5,dur:0,sev:'critical',on:true},
+];
+const USERS=[
+ {user:'admin',name:'管理员',role:'admin',last:'2026-08-23 14:10'},
+ {user:'ops',name:'运维',role:'admin',last:'2026-08-22 09:22'},
+];
+
+// ---------- theme ----------
+function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()}
+function palette(){return{pri:css('--primary'),ok:css('--ok'),warn:css('--warn'),danger:css('--danger'),grid:css('--chart-grid')}}
+function toggleTheme(){
+ const cur=document.documentElement.getAttribute('data-theme');
+ const nxt=cur==='dark'?'light':'dark';
+ document.documentElement.setAttribute('data-theme',nxt);
+ document.getElementById('themeBtn').textContent=nxt==='dark'?'☀':'🌙';
+ setTimeout(()=>rerender(),50);
+}
+
+// ---------- charts ----------
+function spark(id,data,color){
+ const w=280,h=30,svg=document.getElementById(id);if(!svg)return;
+ const max=Math.max(...data,1),min=Math.min(...data,0),rng=(max-min)||1;
+ const pts=data.map((v,i)=>`${((i/(data.length-1))*w).toFixed(1)},${(h-3-((v-min)/rng)*(h-5)).toFixed(1)}`).join(' ');
+ svg.setAttribute('viewBox',`0 0 ${w} ${h}`);
+ svg.innerHTML=`<defs><linearGradient id="g${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".28"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs><polygon points="0,${h} ${pts} ${w},${h}" fill="url(#g${id})"/><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.6"/>`;
+}
+function lineChart(id,series){
+ const svg=document.getElementById(id);if(!svg)return;
+ const P=palette();
+ const w=560,h=150,pad=8;let all=[];series.forEach(s=>all=all.concat(s.data));
+ const max=Math.max(...all,1),min=Math.min(...all,0),rng=(max-min)||1;
+ let html='';
+ for(let i=0;i<=4;i++){const y=pad+(i/4)*(h-2*pad);html+=`<line x1="0" y1="${y}" x2="${w}" y2="${y}" stroke="${P.grid}" stroke-width="1"/>`;}
+ series.forEach(s=>{
+  const c=s.color||P.pri;
+  const pts=s.data.map((v,i)=>`${((i/(s.data.length-1))*w).toFixed(1)},${(h-pad-((v-min)/rng)*(h-2*pad)).toFixed(1)}`).join(' ');
+  html+=`<defs><linearGradient id="c${id}${s.label}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c}" stop-opacity=".2"/><stop offset="1" stop-color="${c}" stop-opacity="0"/></linearGradient></defs>`;
+  html+=`<polygon points="0,${h-pad} ${pts} ${w},${h-pad}" fill="url(#c${id}${s.label})"/>`;
+  html+=`<polyline points="${pts}" fill="none" stroke="${c}" stroke-width="1.8"/>`;
+ });
+ svg.setAttribute('viewBox',`0 0 ${w} ${h}`);svg.innerHTML=html;
+}
+
+// ---------- renderers ----------
+function renderOverview(){
+ const P=palette();
+ const stats=[
+  {l:'主机',v:'4',ico:'▤',bg:'var(--primary-bg)',c:'var(--primary)',go:'hosts'},
+  {l:'在线',v:'3',ico:'●',bg:'rgba(82,196,26,.14)',c:'var(--ok)',go:'hosts'},
+  {l:'运行中容器',v:'10<small> / 11</small>',ico:'▢',bg:'var(--primary-bg)',c:'var(--primary)',go:'containers'},
+  {l:'未恢复告警',v:'2',ico:'⚠',bg:'rgba(255,77,79,.14)',c:'var(--danger)',go:'alerts'},
+ ];
+ const sw=document.getElementById('ovStats');sw.innerHTML='';
+ stats.forEach(s=>{const d=document.createElement('div');d.className='card stat';d.onclick=()=>go(s.go);
+  d.innerHTML=`<div class="top"><span class="ico" style="background:${s.bg};color:${s.c}">${s.ico}</span></div><div class="l">${s.l}</div><div class="v">${s.v}</div>`;sw.appendChild(d);});
+ const w=document.getElementById('ovHosts');w.innerHTML='';
+ NODES.forEach(n=>{
+  const off=n.led==='off';
+  const cpuC=n.cpu>90?P.danger:n.cpu>70?P.warn:P.pri;
+  const memC=n.mem>90?P.danger:n.mem>75?P.warn:P.pri;
+  const card=document.createElement('div');card.className='card hover';
+  card.innerHTML=`<div class="node-head" onclick="openAgent('${n.id}')"><div><div class="node-name">${n.name}<span class="led ${n.led}"></span></div><div class="node-sub">${n.os} · ${n.arch}</div></div><span class="tag ${n.led==='on'?'ok':n.led==='warn'?'warn':'down'}">${off?'离线':n.led==='warn'?'高负载':'正常'}</span></div>
+   <div class="metrics">
+    <div class="metric"><div class="lab">CPU</div><div class="val" style="color:${cpuC}">${off?'—':n.cpu+'%'}</div><svg class="spark" id="ov-${n.id}-c"></svg></div>
+    <div class="metric"><div class="lab">内存</div><div class="val" style="color:${memC}">${off?'—':n.mem+'%'}</div><svg class="spark" id="ov-${n.id}-m"></svg></div>
+    <div class="metric"><div class="lab">磁盘</div><div class="val">${off?'—':n.disk+'%'}</div></div>
+    <div class="metric"><div class="lab">负载</div><div class="val">${off?'—':n.load}</div></div>
+   </div>`;
+  w.appendChild(card);
+ });
+ NODES.forEach(n=>{if(n.led==='off')return;spark(`ov-${n.id}-c`,n.cpuS,P.pri);spark(`ov-${n.id}-m`,n.memS,P.pri);});
+ const tb=document.querySelector('#ovAlerts tbody');tb.innerHTML='';
+ ALERTS.forEach(a=>{const tr=document.createElement('tr');
+  tr.innerHTML=`<td><span class="tag ${a.sev}">${a.sev}</span></td><td>${a.rule}</td><td class="mono">${a.node}</td><td class="mono">${a.metric}</td><td class="mono">${a.val} / ${a.th}</td><td class="mono">${a.start}</td>`;tb.appendChild(tr);});
+}
+function renderHosts(){
+ const P=palette();
+ const tb=document.querySelector('#hostTable tbody');tb.innerHTML='';
+ [...NODES].sort((a,b)=>(a.led==='off')-(b.led==='off')).forEach(n=>{
+  const off=n.led==='off';
+  const cpuC=n.cpu>90?P.danger:n.cpu>70?P.warn:P.pri;
+  const memC=n.mem>90?P.danger:n.mem>75?P.warn:P.pri;
+  const diskC=n.disk>90?P.danger:n.disk>75?P.warn:P.pri;
+  const bar=(v,c)=>off?'<span class="muted">—</span>':`<div class="cell"><span class="num" style="color:${c}">${v}%</span><span class="meter"><i style="width:${v}%;background:${c}"></i></span></div>`;
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td><span class="led ${n.led}"></span></td><td class="mono"><b class="link" onclick="openAgent('${n.id}')">${n.name}</b></td><td>${n.os}<br><span class="muted" style="font-size:12px">${n.arch}</span></td><td class="mono">${off?'—':n.version}</td><td>${bar(n.cpu,cpuC)}</td><td>${bar(n.mem,memC)}</td><td>${bar(n.disk,diskC)}</td><td class="mono">${off?'—':n.load}</td><td class="mono">${off?'—':n.agentCpu+'% / '+n.agentRss}</td>`;
+  tb.appendChild(tr);
+ });
+}
+let curAgent=null;
+function openAgent(id){const n=NODES.find(x=>x.id===id);if(!n)return;curAgent=n;
+ document.getElementById('agName').textContent=n.name;document.getElementById('agLed').className='led '+n.led;
+ go('agent');drawAgent();
+}
+function drawAgent(){
+ const n=curAgent;if(!n)return;const P=palette();
+ if(n.led==='off'){['agCpu','agMem','agNet','agLoad'].forEach(i=>{const s=document.getElementById(i);s.innerHTML=`<text x="50%" y="50%" fill="${P.warn}" font-size="13" text-anchor="middle" dominant-baseline="middle">节点离线</text>`;});
+  document.getElementById('agDisk').innerHTML='<div class="muted">—</div>';
+  document.getElementById('agSelf').innerHTML='<div class="k">状态</div><div>离线</div>';
+  document.querySelector('#agCont tbody').innerHTML='<tr><td colspan="7" class="muted">无数据</td></tr>';
+  document.querySelector('#agAddr tbody').innerHTML='<tr><td colspan="4" class="muted">无数据</td></tr>';return;}
+ lineChart('agCpu',[{data:n.cpuS,label:'cpu'}]);
+ lineChart('agMem',[{data:n.memS,label:'mem'}]);
+ lineChart('agNet',[{data:n.cpuS.map(v=>v*0.12),label:'rx'},{data:n.memS.map(v=>v*0.09),color:P.warn,label:'tx'}]);
+ lineChart('agLoad',[{data:n.loadS,color:P.warn,label:'load'}]);
+ document.getElementById('agDisk').innerHTML=`<div class="kv"><div class="k">/ (ext4)</div><div class="mono">${n.disk}% ${n.disk>90?'<span style="color:'+P.danger+'">· 高</span>':''}</div></div>`;
+ document.getElementById('agSelf').innerHTML=`<div class="k">Agent CPU</div><div class="mono">${n.agentCpu}%</div><div class="k">Agent RSS</div><div class="mono">${n.agentRss}</div><div class="k">上报间隔</div><div class="mono">60s</div><div class="k">版本</div><div class="mono">${n.version}</div>`;
+ const ct=document.querySelector('#agCont tbody');ct.innerHTML='';
+ CONTAINERS.filter(c=>c.node===n.name&&c.state!=='down').forEach(c=>{
+  const st=c.state==='running'?'ok':c.state==='restarting'?'warn':'down';
+  const tr=document.createElement('tr');tr.style.cursor='pointer';tr.onclick=()=>openContainer(c.node,c.name);
+  tr.innerHTML=`<td class="link">${c.name}</td><td class="mono muted">${c.image}</td><td><span class="tag ${st}">${c.state}</span></td><td class="mono">${c.restarts}</td><td class="mono">${c.cpu}%</td><td class="mono">${c.mem}</td><td class="mono">${c.net}</td>`;ct.appendChild(tr);
+ });
+ if(!ct.children.length)ct.innerHTML='<tr><td colspan="7" class="muted">无运行容器</td></tr>';
+ const at=document.querySelector('#agAddr tbody');at.innerHTML='';
+ (ADDRS[n.id]||[]).forEach(a=>{const tr=document.createElement('tr');
+  tr.innerHTML=`<td class="mono">${a.iface}</td><td><span class="tag ${a.fam==='IPv6'?'run':'ok'}">${a.fam}</span></td><td class="mono">${a.addr}</td><td><button class="copy" onclick="copy('${a.addr}')">复制</button></td>`;at.appendChild(tr);});
+}
+function openContainer(node,name){
+ const c=CONTAINERS.find(x=>x.node===node&&x.name===name);if(!c)return;
+ document.getElementById('cdName').textContent=name;
+ const st=c.state==='running'?'run':c.state==='restarting'?'warn':'down';
+ document.getElementById('cdState').className='tag '+st;document.getElementById('cdState').textContent=c.state;
+ document.getElementById('cdNode').textContent=node;document.getElementById('cdImg').textContent=c.image;document.getElementById('cdRestarts').textContent=c.restarts;
+ go('container');
+ const base=Array.from({length:24},()=>+(Math.random()*40+10).toFixed(1));
+ lineChart('cdCpu',[{data:base,label:'cpu'}]);lineChart('cdMem',[{data:base.map(v=>v*2+40),label:'mem'}]);
+}
+function renderContainers(){
+ const tb=document.querySelector('#contTable tbody');tb.innerHTML='';
+ CONTAINERS.forEach(c=>{
+  const st=c.state==='running'?'ok':c.state==='restarting'?'warn':'down';
+  const tr=document.createElement('tr');
+  const nameCell=c.state!=='down'?`<span class="link" onclick="openContainer('${c.node}','${c.name}')">${c.name}</span>`:'—';
+  tr.innerHTML=`<td class="mono">${c.node}</td><td>${nameCell}</td><td class="mono muted">${c.image}</td><td><span class="tag ${st}">${c.state}</span></td><td class="mono">${c.restarts}</td><td class="mono">${c.cpu}%</td><td class="mono">${c.mem}</td><td class="mono">${c.net}</td>`;tb.appendChild(tr);
+ });
+}
+function renderAlerts(){
+ const tb=document.querySelector('#alertTable tbody');tb.innerHTML='';
+ ALERTS.forEach(a=>{const tr=document.createElement('tr');
+  tr.innerHTML=`<td><span class="tag ${a.sev}">${a.sev}</span></td><td>${a.rule}</td><td class="mono">${a.node}${a.entity!==a.node?' / '+a.entity:''}</td><td class="mono">${a.metric}</td><td class="mono">${a.val} / ${a.th}</td><td><span class="tag ${a.state==='firing'?'crit':'ok'}">${a.state}</span></td><td class="mono">${a.start}</td>`;tb.appendChild(tr);});
+}
+function renderRules(){
+ const tb=document.querySelector('#ruleTable tbody');tb.innerHTML='';
+ RULES.forEach(r=>{const tr=document.createElement('tr');
+  tr.innerHTML=`<td>${r.name}</td><td class="mono">${r.metric}</td><td class="mono">${r.op} ${r.th}</td><td class="mono">${r.dur}s</td><td><span class="tag ${r.sev==='critical'?'crit':'warn'}">${r.sev}</span></td><td><span class="switch ${r.on?'on':''}" onclick="this.classList.toggle('on')"></span></td>`;tb.appendChild(tr);});
+}
+function renderUsers(){
+ const tb=document.querySelector('#userTable tbody');tb.innerHTML='';
+ USERS.forEach((u,i)=>{const tr=document.createElement('tr');
+  tr.innerHTML=`<td class="mono"><b>${u.user}</b></td><td>${u.name}</td><td><span class="tag run">${u.role}</span></td><td class="mono muted">${u.last}</td><td>${i===0?'':'<span class="link">重置密码</span> · <span class="link">删除</span>'}</td>`;tb.appendChild(tr);});
+}
+function copy(t){navigator.clipboard?.writeText(t);toast('已复制: '+t);}
+
+// ---------- nav ----------
+const TITLES={overview:'总览',hosts:'主机',agent:'节点详情',container:'容器详情',containers:'容器',alerts:'告警事件',rules:'告警规则',settings:'设置'};
+let curPage='overview';
+function rerender(){
+ if(curPage==='overview')renderOverview();
+ if(curPage==='hosts')renderHosts();
+ if(curPage==='agent')drawAgent();
+ if(curPage==='containers')renderContainers();
+ if(curPage==='alerts')renderAlerts();
+ if(curPage==='rules')renderRules();
+ if(curPage==='settings')renderUsers();
+}
+function go(p){
+ curPage=p;
+ document.querySelectorAll('.page').forEach(s=>s.classList.remove('active'));
+ document.getElementById(p).classList.add('active');
+ document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('active',a.dataset.page===p));
+ document.getElementById('pageTitle').textContent=TITLES[p]||'';
+ window.location.hash=p;
+ if(p==='overview')renderOverview();
+ if(p==='hosts')renderHosts();
+ if(p==='containers')renderContainers();
+ if(p==='alerts')renderAlerts();
+ if(p==='rules')renderRules();
+ if(p==='settings')renderUsers();
+}
+document.getElementById('nav').addEventListener('click',e=>{const a=e.target.closest('a');if(a)go(a.dataset.page);});
+document.getElementById('agRange').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;document.querySelectorAll('#agRange button').forEach(x=>x.classList.remove('active'));b.classList.add('active');drawAgent();});
+function toggleSide(){const sb=document.getElementById('sidebar');sb.classList.toggle('collapsed');document.querySelector('.coll-btn').textContent=sb.classList.contains('collapsed')?'⟩ 展开':'⟨ 折叠';}
+function doLogin(){document.getElementById('loginView').style.display='none';document.getElementById('appView').style.display='block';go('overview');}
+function doLogout(){document.getElementById('appView').style.display='none';document.getElementById('loginView').style.display='flex';}
+let toastT;
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),1600);}
+const h=window.location.hash.replace('#','');if(h&&document.getElementById(h))go(h);else go('overview');
+</script>
+</body>
+</html>

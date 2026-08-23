@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>litesentry · 主机容器监控平台</title>
+    <style>
+      /* 首屏防闪：JS 就绪前按 localStorage 预置主题 */
+      html {
+        background: #f4f6f9;
+      }
+      html[data-theme="dark"] {
+        background: #0f1115;
+      }
+    </style>
+    <script>
+      // 与 src/theme.ts 共用 ls_theme 键；无记录则浅色
+      try {
+        var t = localStorage.getItem('ls_theme');
+        if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

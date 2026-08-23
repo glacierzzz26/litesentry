@@ -1,0 +1,154 @@
+// 数据模型 —— 与 server/internal/store 的 JSON 结构一一对应（Go 结构体序列化）。
+// 重写阶段用 mock 数据；结构保持对齐，后续接真实接口零迁移。
+
+export interface IPAddr {
+  family: string; // ipv4 | ipv6
+  addr: string;
+  iface: string;
+  scope: string; // global | link | loopback
+}
+
+export interface Agent {
+  agent_id: string;
+  hostname: string;
+  os: string;
+  arch: string;
+  kernel: string;
+  version: string; // Agent 构建版本（注册上报）
+  ipv4: IPAddr[];
+  ipv6: IPAddr[];
+  last_seen: string; // RFC3339
+  created_at: string;
+  status: string; // 服务端权威判定：online | offline，预留 upgrading 等
+}
+
+export interface HostSample {
+  agent_id: string;
+  ts: string;
+  hostname: string;
+  os: string;
+  arch: string;
+  kernel: string;
+  uptime_s: number;
+  load_1m: number;
+  load_5m: number;
+  cpu_pct: number;
+  agent_cpu_pct: number; // Agent 自身进程 CPU 占用（%）
+  agent_mem_rss: number; // Agent 自身 RSS（字节）
+  mem_total: number;
+  mem_used: number;
+  swap_total: number;
+  swap_used: number;
+  net_rx_bps: number;
+  net_tx_bps: number;
+}
+
+export interface DiskSample {
+  agent_id: string;
+  ts: string;
+  mount: string;
+  fs: string;
+  total: number;
+  used: number;
+}
+
+export interface ContainerSample {
+  agent_id: string;
+  ts: string;
+  container_id: string;
+  name: string;
+  image: string;
+  state: string;
+  restarts: number;
+  uptime_s: number;
+  cpu_pct: number;
+  mem_usage: number;
+  mem_limit: number;
+  net_rx_bps: number;
+  net_tx_bps: number;
+}
+
+/** 取某窗口内每个实体的最近一条（按 ts 归并）。 */
+export function latestByKey<T extends { ts: string }>(rows: T[], key: (r: T) => string): Map<string, T> {
+  const out = new Map<string, T>();
+  for (const r of rows) {
+    const k = key(r);
+    const cur = out.get(k);
+    if (!cur || new Date(r.ts).getTime() > new Date(cur.ts).getTime()) out.set(k, r);
+  }
+  return out;
+}
+
+// ---- 总览聚合 ----
+
+export interface Overview {
+  hosts: HostSample[]; // 每节点最近一条主机样本
+  disk_max: Record<string, number>; // agent_id → 最高挂载点使用率%
+  firing: number; // 当前 firing 事件数
+}
+
+// ---- 告警 ----
+
+export interface AlertRule {
+  id: string;
+  name: string;
+  metric: string; // cpu_pct | mem_pct | load_1m | disk_pct | container_cpu | container_mem | container_down | offline
+  op: string; // > | <
+  threshold: number;
+  duration_s: number; // 持续超过阈值多久才触发（秒），0 = 立即
+  severity: string; // warning | critical
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AlertEvent {
+  id: string;
+  rule_id: string;
+  rule_name: string;
+  agent_id: string;
+  agent_name: string;
+  entity_id: string; // 容器规则 = 容器 id；主机/离线规则为空
+  entity_name: string; // 容器规则 = 容器名称
+  metric: string;
+  value: number;
+  threshold: number;
+  severity: string; // warning | critical
+  state: string; // firing | resolved
+  started_at: string;
+  resolved_at?: string;
+  notified_at?: string;
+}
+
+// ---- 用户 / 认证 ----
+
+export interface User {
+  id: string;
+  username: string;
+  display_name: string;
+  role: string; // 阶段一全 admin，列预留
+  must_change_password: boolean; // 首登强制改密
+  last_login_at?: string; // RFC3339；从未登录 = 无
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LoginResult {
+  token: string;
+  expires_at: string;
+  must_change_password: boolean;
+  user: User;
+}
+
+// ---- 设置 ----
+
+export interface SettingsView {
+  feishu_webhook: string;
+  feishu_secret_set: boolean;
+}
+
+export interface SettingsBody {
+  feishu_webhook: string;
+  feishu_secret?: string;
+  feishu_secret_clear?: boolean;
+}
