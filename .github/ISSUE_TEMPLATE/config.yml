@@ -1,0 +1,7 @@
+# 模板选择器配置 —— 禁止空白 issue，引导使用模板
+# Template chooser config: disallow blank issues, guide to templates.
+blank_issues_enabled: false
+contact_links:
+  - name: 项目主页 / Project Home
+    url: https://github.com/glacierzzz26/litesentry
+    about: 查看 README 与文档 / See README & documentation.
