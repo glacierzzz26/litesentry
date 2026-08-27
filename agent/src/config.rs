@@ -17,6 +17,8 @@ pub struct Config {
     pub id_file: String,
     /// 上报间隔（秒），即心跳周期
     pub interval_secs: u64,
+    /// 插件缓存目录（下载的插件二进制按 plugin_id/version 存放，0700）
+    pub plugin_dir: String,
     /// 双向 TLS：CA 证书 PEM 路径（Agent 用它校验 Server 身份）
     pub tls_ca: String,
     /// 双向 TLS：Agent 客户端证书 PEM 路径
@@ -54,6 +56,8 @@ impl Config {
             id_file: std::env::var("LS_ID_FILE")
                 .unwrap_or_else(|_| "/var/lib/litesentry/agent_id".into()),
             interval_secs,
+            plugin_dir: std::env::var("LS_PLUGIN_DIR")
+                .unwrap_or_else(|_| "/var/lib/litesentry/plugins".into()),
             tls_ca: std::env::var("LS_TLS_CA").unwrap_or_default(),
             tls_cert: std::env::var("LS_TLS_CERT").unwrap_or_default(),
             tls_key: std::env::var("LS_TLS_KEY").unwrap_or_default(),

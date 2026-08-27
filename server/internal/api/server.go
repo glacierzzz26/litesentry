@@ -76,6 +76,11 @@ func (s *Server) Routes() *gin.Engine {
 		api.PUT("/settings", s.putSettings)
 		api.POST("/settings/feishu-test", s.feishuTest)
 
+		api.GET("/plugins", s.listPlugins)
+		api.POST("/plugins", s.uploadPlugin)
+		api.GET("/plugins/:id", s.pluginDetail)
+		api.POST("/plugins/:id/assign", s.assignPlugin)
+
 		api.GET("/alerts/rules", s.listRules)
 		api.POST("/alerts/rules", s.createRule)
 		api.PUT("/alerts/rules/:id", s.updateRule)

@@ -26,9 +26,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Agent_Register_FullMethodName = "/litesentry.Agent/Register"
-	Agent_Push_FullMethodName     = "/litesentry.Agent/Push"
-	Agent_Stream_FullMethodName   = "/litesentry.Agent/Stream"
+	Agent_Register_FullMethodName    = "/litesentry.Agent/Register"
+	Agent_Push_FullMethodName        = "/litesentry.Agent/Push"
+	Agent_FetchPlugin_FullMethodName = "/litesentry.Agent/FetchPlugin"
+	Agent_Stream_FullMethodName      = "/litesentry.Agent/Stream"
 )
 
 // AgentClient is the client API for Agent service.
@@ -37,9 +38,11 @@ const (
 type AgentClient interface {
 	// 节点注册：Agent 启动时用自身机器信息换取（或复用）agent_id
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterReply, error)
-	// 常规定时上报（默认 60s/批，即心跳）
+	// 常规定时上报（默认 60s/批，即心跳）；响应携带 DesiredState 下发配置
 	Push(ctx context.Context, in *MetricsBatch, opts ...grpc.CallOption) (*PushAck, error)
-	// 可选：长连接流式，实时性要求高时启用（阶段二插件分发复用此通道）
+	// 拉插件二进制（流式分块）：Agent 在 DesiredState 发现缺/旧时主动调用
+	FetchPlugin(ctx context.Context, in *PluginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Chunk], error)
+	// 可选：长连接流式，实时性要求高时启用（预留）
 	Stream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[MetricsBatch, PushAck], error)
 }
 
@@ -71,9 +74,28 @@ func (c *agentClient) Push(ctx context.Context, in *MetricsBatch, opts ...grpc.C
 	return out, nil
 }
 
+func (c *agentClient) FetchPlugin(ctx context.Context, in *PluginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Chunk], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[0], Agent_FetchPlugin_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[PluginRequest, Chunk]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_FetchPluginClient = grpc.ServerStreamingClient[Chunk]
+
 func (c *agentClient) Stream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[MetricsBatch, PushAck], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[0], Agent_Stream_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Agent_ServiceDesc.Streams[1], Agent_Stream_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -90,9 +112,11 @@ type Agent_StreamClient = grpc.BidiStreamingClient[MetricsBatch, PushAck]
 type AgentServer interface {
 	// 节点注册：Agent 启动时用自身机器信息换取（或复用）agent_id
 	Register(context.Context, *RegisterRequest) (*RegisterReply, error)
-	// 常规定时上报（默认 60s/批，即心跳）
+	// 常规定时上报（默认 60s/批，即心跳）；响应携带 DesiredState 下发配置
 	Push(context.Context, *MetricsBatch) (*PushAck, error)
-	// 可选：长连接流式，实时性要求高时启用（阶段二插件分发复用此通道）
+	// 拉插件二进制（流式分块）：Agent 在 DesiredState 发现缺/旧时主动调用
+	FetchPlugin(*PluginRequest, grpc.ServerStreamingServer[Chunk]) error
+	// 可选：长连接流式，实时性要求高时启用（预留）
 	Stream(grpc.BidiStreamingServer[MetricsBatch, PushAck]) error
 	mustEmbedUnimplementedAgentServer()
 }
@@ -109,6 +133,9 @@ func (UnimplementedAgentServer) Register(context.Context, *RegisterRequest) (*Re
 }
 func (UnimplementedAgentServer) Push(context.Context, *MetricsBatch) (*PushAck, error) {
 	return nil, status.Error(codes.Unimplemented, "method Push not implemented")
+}
+func (UnimplementedAgentServer) FetchPlugin(*PluginRequest, grpc.ServerStreamingServer[Chunk]) error {
+	return status.Error(codes.Unimplemented, "method FetchPlugin not implemented")
 }
 func (UnimplementedAgentServer) Stream(grpc.BidiStreamingServer[MetricsBatch, PushAck]) error {
 	return status.Error(codes.Unimplemented, "method Stream not implemented")
@@ -170,6 +197,17 @@ func _Agent_Push_Handler(srv interface{}, ctx context.Context, dec func(interfac
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_FetchPlugin_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(PluginRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentServer).FetchPlugin(m, &grpc.GenericServerStream[PluginRequest, Chunk]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Agent_FetchPluginServer = grpc.ServerStreamingServer[Chunk]
+
 func _Agent_Stream_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(AgentServer).Stream(&grpc.GenericServerStream[MetricsBatch, PushAck]{ServerStream: stream})
 }
@@ -194,6 +232,11 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "FetchPlugin",
+			Handler:       _Agent_FetchPlugin_Handler,
+			ServerStreams: true,
+		},
 		{
 			StreamName:    "Stream",
 			Handler:       _Agent_Stream_Handler,

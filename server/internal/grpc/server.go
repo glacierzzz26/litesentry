@@ -10,8 +10,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"os"
+	"sort"
+	"strconv"
 	"time"
 
 	"google.golang.org/grpc"
@@ -87,9 +90,14 @@ func (s *Server) Push(ctx context.Context, batch *litesentrypb.MetricsBatch) (*l
 	if err := s.persist(ctx, batch); err != nil {
 		return nil, status.Error(codes.Internal, "persist failed: "+err.Error())
 	}
+	ds, err := s.desiredState(ctx, batch.GetAgentId())
+	if err != nil {
+		return nil, status.Error(codes.Internal, "desired state failed: "+err.Error())
+	}
 	return &litesentrypb.PushAck{
-		ServerTime: time.Now().UTC().Format(time.RFC3339),
-		Message:    "ok",
+		ServerTime:   time.Now().UTC().Format(time.RFC3339),
+		Message:      "ok",
+		DesiredState: ds,
 	}, nil
 }
 
@@ -142,13 +150,54 @@ func (s *Server) Stream(stream litesentrypb.Agent_StreamServer) error {
 		if err := s.persist(stream.Context(), batch); err != nil {
 			return status.Error(codes.Internal, "persist failed: "+err.Error())
 		}
+		ds, err := s.desiredState(stream.Context(), batch.GetAgentId())
+		if err != nil {
+			return status.Error(codes.Internal, "desired state failed: "+err.Error())
+		}
 		if err := stream.Send(&litesentrypb.PushAck{
-			ServerTime: time.Now().UTC().Format(time.RFC3339),
-			Message:    "ok",
+			ServerTime:   time.Now().UTC().Format(time.RFC3339),
+			Message:      "ok",
+			DesiredState: ds,
 		}); err != nil {
 			return err
 		}
 	}
+}
+
+// FetchPlugin 流式下发插件二进制（分块 + 末尾分块携带完整 SHA-256）。
+// Agent 端按分块拼装，校验和一致才缓存执行；不匹配拒绝运行。
+func (s *Server) FetchPlugin(req *litesentrypb.PluginRequest, stream litesentrypb.Agent_FetchPluginServer) error {
+	if err := s.auth(stream.Context()); err != nil {
+		return err
+	}
+	if req.GetPluginId() == "" || req.GetVersion() == "" {
+		return status.Error(codes.InvalidArgument, "plugin_id/version required")
+	}
+	p, err := s.store.GetPlugin(stream.Context(), req.GetPluginId(), req.GetVersion())
+	if err != nil {
+		return status.Error(codes.NotFound, "plugin not found: "+err.Error())
+	}
+	if len(p.Data) == 0 {
+		return status.Error(codes.Internal, "plugin has no binary content")
+	}
+	const chunkSize = 256 * 1024 // 256KB 分块
+	for off := 0; off < len(p.Data); off += chunkSize {
+		end := off + chunkSize
+		if end > len(p.Data) {
+			end = len(p.Data)
+		}
+		chunk := &litesentrypb.Chunk{
+			Data: p.Data[off:end],
+			Size: uint64(len(p.Data)),
+		}
+		if end == len(p.Data) {
+			chunk.Sha256 = p.SHA256 // 末尾分块携带完整校验和
+		}
+		if err := stream.Send(chunk); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ServerTLS 构建 gRPC 服务端 mTLS 配置：双向 TLS，Agent 必须持有本 CA 签发的客户端证书。
@@ -269,5 +318,164 @@ func (s *Server) persist(ctx context.Context, batch *litesentrypb.MetricsBatch) 
 			return err
 		}
 	}
-	return s.store.AppendBatch(ctx, hs, disks, containers)
+	if err := s.store.AppendBatch(ctx, hs, disks, containers); err != nil {
+		return err
+	}
+
+	// 插件 Series（阶段二）：统一落 series 表，S2 再按 name 前缀翻译回现有表。
+	if len(batch.GetSeries()) > 0 {
+		items := make([]*store.Series, 0, len(batch.GetSeries()))
+		for _, sr := range batch.GetSeries() {
+			st := ts
+			if sr.GetTs() > 0 {
+				st = time.Unix(int64(sr.GetTs()), 0).UTC()
+			}
+			items = append(items, &store.Series{
+				Name:   sr.GetName(),
+				Tags:   sr.GetTags(),
+				Fields: sr.GetFields(),
+				TS:     st,
+			})
+		}
+		if err := s.store.AppendSeries(ctx, batch.GetAgentId(), items); err != nil {
+			return err
+		}
+	}
+
+	// frp 状态（阶段二）：agent 上报进程 + 隧道状态，覆盖写最近一次。
+	if fs := batch.GetFrp(); fs != nil {
+		sts := &store.FrpStatus{
+			Running:    fs.GetRunning(),
+			FrpVersion: fs.GetFrpVersion(),
+			Error:      fs.GetError(),
+			TS:         ts,
+		}
+		for _, t := range fs.GetTunnels() {
+			sts.Tunnels = append(sts.Tunnels, store.FrpTunnelStatus{
+				Name:    t.GetName(),
+				Type:    t.GetType(),
+				Status:  t.GetStatus(),
+				Err:     t.GetErr(),
+				RXBytes: t.GetRxBytes(),
+				TXBytes: t.GetTxBytes(),
+			})
+		}
+		if err := s.store.UpsertFrpStatus(ctx, batch.GetAgentId(), sts); err != nil {
+			return err
+		}
+	}
+
+	// 定时任务执行结果（阶段二）：落审计 + 回写任务最近一次摘要。
+	for _, tr := range batch.GetTaskRuns() {
+		started := time.Unix(int64(tr.GetStartedAt()), 0).UTC()
+		if tr.GetStartedAt() == 0 {
+			started = ts
+		}
+		var finished *time.Time
+		if tr.GetFinishedAt() > 0 {
+			f := time.Unix(int64(tr.GetFinishedAt()), 0).UTC()
+			finished = &f
+		}
+		code := tr.GetExitCode()
+		if err := s.store.AppendTaskRun(ctx, &store.TaskRun{
+			TaskID:     tr.GetTaskId(),
+			AgentID:    batch.GetAgentId(),
+			Status:     tr.GetStatus(),
+			ExitCode:   &code,
+			Output:     tr.GetOutput(),
+			StartedAt:  started,
+			FinishedAt: finished,
+		}); err != nil {
+			return err
+		}
+		if err := s.store.UpdateTaskLastRun(ctx, tr.GetTaskId(), tr.GetStatus(), tr.GetOutput(), started); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// desiredState 构造某 agent 的下发期望状态：插件 manifest + frp 配置 + 定时任务。
+// state_version = 内容哈希（FNV-1a 64bit）：内容不变则版本不变（agent 跳过重应用），任一变更则变化。
+// 注：frp 字段（frp_toml / frp_enabled）由 S3 的 frp 渲染包填充，S1 保持空。
+func (s *Server) desiredState(ctx context.Context, agentID string) (*litesentrypb.DesiredState, error) {
+	ds := &litesentrypb.DesiredState{}
+
+	aps, err := s.store.AgentPlugins(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	for _, ap := range aps {
+		ds.Plugins = append(ds.Plugins, &litesentrypb.PluginSpec{
+			PluginId: ap.PluginID,
+			Version:  ap.Version,
+			ArgsJson: ap.ArgsJSON,
+		})
+	}
+
+	tasks, err := s.store.ListTasks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	serverID := ""
+	for _, t := range tasks {
+		if !t.Enabled {
+			continue
+		}
+		switch t.TargetAgentID {
+		case "":
+			// 公网机（server 同机 agent）：由设置项 server_agent_id 声明，未声明则无下发对象
+			if serverID == "" {
+				serverID, _ = s.store.GetSetting(ctx, "server_agent_id")
+			}
+			if serverID != agentID {
+				continue
+			}
+		case agentID:
+		default:
+			continue
+		}
+		ds.Tasks = append(ds.Tasks, &litesentrypb.TaskSpec{
+			TaskId:   t.ID,
+			Cron:     t.Cron,
+			PluginId: t.PluginID,
+			ArgsJson: t.ArgsJSON,
+			TimeoutS: t.TimeoutS,
+		})
+	}
+
+	ds.StateVersion = desiredStateVersion(ds)
+	return ds, nil
+}
+
+// desiredStateVersion 计算 DesiredState 的内容哈希（FNV-1a 64bit）。
+// 插件 / 任务先按 id 排序，保证顺序无关；任何字段变更都会改变版本号。
+func desiredStateVersion(ds *litesentrypb.DesiredState) uint64 {
+	h := fnv.New64a()
+	sep := func(s string) {
+		_, _ = io.WriteString(h, s)
+		_, _ = h.Write([]byte{0})
+	}
+	if ds.GetFrpEnabled() {
+		sep("frp1")
+	} else {
+		sep("frp0")
+	}
+	sep(ds.GetFrpToml())
+
+	sort.Slice(ds.Plugins, func(i, j int) bool { return ds.Plugins[i].GetPluginId() < ds.Plugins[j].GetPluginId() })
+	for _, p := range ds.Plugins {
+		sep(p.GetPluginId())
+		sep(p.GetVersion())
+		sep(p.GetArgsJson())
+	}
+	sort.Slice(ds.Tasks, func(i, j int) bool { return ds.Tasks[i].GetTaskId() < ds.Tasks[j].GetTaskId() })
+	for _, t := range ds.Tasks {
+		sep(t.GetTaskId())
+		sep(t.GetCron())
+		sep(t.GetPluginId())
+		sep(t.GetArgsJson())
+		sep(strconv.FormatUint(uint64(t.GetTimeoutS()), 10))
+	}
+	return h.Sum64()
 }

@@ -1,6 +1,6 @@
 # litesentry — 轻量主机 + 容器监控系统设计
 
-> 阶段：第一阶段（**已实现**，本设计文档已随实现对齐）+ 第二阶段前瞻（插件化，待定稿）
+> 阶段：第一阶段（**已实现**，本设计文档已随实现对齐）+ 第二阶段（插件化 + 控制平面，**已定稿**，见文末）
 > 日期：2026-08-21（定稿）→ 2026-08-23（随实现更新）
 > 技术栈：Agent = **Rust** · Server = **Go + Gin** · 前端 = **React 19 + Ant Design v5** · 通信 = **gRPC**（token + 可选 mTLS）
 
@@ -337,71 +337,101 @@ litesentry/
 
 ---
 
-# 第二阶段 — Agent 插件化演进（待定稿）
+# 第二阶段 — 控制平面 + 插件系统 + FRP + 定时任务（已定稿）
 
-> 状态：**待定稿**。方向已与第一阶段架构确认兼容，信任边界需独立评审。
-> 核心变化：Agent 只做 **基本心跳上报 + 插件管理 + 数据传输**；采集逻辑下沉为插件（Lua 脚本或二进制），**插件由 Server 提供并分发**。
+> 状态：**已定稿**（2026-08-27）。本轮启动动机：用户新增 **FRP 配置与监控** 与 **定时任务管理页面**，并确认了完整插件化方向：
+> ① frps / frpc 均由 **agent 管理**（server 也要装 agent，server 不直接改本机 frps）；② 插件系统**一步做到二进制插件**；③ **现有 host/docker 采集本次就迁移成插件任务**。
+> 核心变化：Server 升级为**纯控制平面**（存配置/插件/任务、下发、收状态，**永不 shell out**）；Agent 升级为**传输核 + 插件宿主 + frp 进程管理器 + 本地 cron 执行器**。
 
 ## 兼容性结论
 
-- **传输层 / Server 骨架 / 前端均不改**：现有 push 模型（NAT 友好）+ gRPC + TLS/mTLS 完全承接；插件分发复用同一通道（`Stream` 已预留）
-- **Agent 内部重构**：从"采集器"变"传输核 + 插件宿主"（阶段一已按 core/collector 分层，降重构成本）
-- **proto 扩展**：阶段一已预留 `Series` 通用字段与 `Stream` 通道，直接启用
-- **安全模型升级**：新增最高风险层 —— Server 向 Agent 分发可执行代码，信任边界与阶段一不同
+- **传输层不改**：沿用阶段一 push 模型（NAT 友好）+ gRPC + token/mTLS。分发复用 `PushAck` 响应（心跳驱动）与既有通道，新增一个 `FetchPlugin` RPC
+- **Agent 内部重构**：采集器 → 插件宿主。阶段一已按 core/collector 分层，采集逻辑整体下沉为插件（本轮即迁移）
+- **proto 扩展**：阶段一预留的 `Series` 正式启用；`PushAck` 增加 `DesiredState`；`MetricsBatch` 增加 series / frp 状态 / 任务结果
+- **安全模型升级**：Server 分发可执行代码 = 变相远程执行能力，信任边界独立评审（见安全模型）
 
-## 插件化后 Agent 职责
+## 架构总览（控制平面模型）
 
 ```
-agent/
-├── core/            # 传输核（不变）：Register + Push + TLS
-├── plugin/
-│   ├── manager/     # 插件生命周期：manifest 拉取→下载→校验→启停/升级
-│   ├── lua/         # Lua 插件运行环境（mlua，进程内 VM）
-│   ├── binary/      # 二进制插件（子进程 + JSON 行协议）
-│   └── api/         # 插件 SDK：统一输出 schema
+公网机   litesentry Server（控制平面）       内网机 agent
+┌─────────────────────────────┐             ┌────────────────────────────┐
+│ 插件仓库/任务定义/frp配置存储 │  PushAck    │ 插件宿主：下载/校验/子进程   │
+│ DesiredState 构造           │ ────下发──▶ │ frpc 管理器：写配置/启停/状态 │
+│ FetchPlugin 流式下发         │ ◀───Push──  │ 本地 cron：触发插件执行       │
+│ 状态落库 + REST(JWT)         │ series+frp+ │ 采集插件：host/docker/disk    │
+│                             │ task_runs   │ （公网机 agent 还管 frps）    │
+└─────────────────────────────┘             └────────────────────────────┘
 ```
 
-## 插件执行模型
+- **核心不变式**：Agent 在 NAT 后只能主动 Push → 所有下发走 **PushAck.DesiredState**（心跳驱动）；插件二进制走 **FetchPlugin**（Agent 发现缺/旧即拉取）
+- **frp 用途独立**：frp 用于暴露内网服务，**不参与** agent↔server 通信
 
-| 类型 | 执行方式 | 适用 | 隔离 |
-|---|---|---|---|
-| **Lua 脚本** | 进程内 `mlua` VM | 轻量采集、快改快发 | 语言级受限（禁 IO/os，仅白名单 API） |
-| **二进制** | 子进程 + stdin/stdout JSON 行 | 重活、自定义语言 | OS 级隔离（进程 + 可选 seccomp/Landlock） |
-
-两种插件产出统一 JSON 契约 → Agent 解析成 `Series`。
-
-## 协议扩展（同一 gRPC 通道）
+## 协议扩展（proto/litesentry.proto）
 
 ```proto
-service Control {
-  rpc Heartbeat(HeartbeatReq) returns (HeartbeatResp);   // 响应含插件 manifest 期望版本
-  rpc FetchPlugin(PluginReq) returns (stream Chunk);     // Agent 拉插件（含校验和）
-  rpc ReportPluginStatus(PluginStatusReq) returns (Ack); // 插件运行状态回传
+message DesiredState {
+  uint64 state_version = 1;          // 递增；Agent 不等于已应用版本才处理
+  string frp_toml      = 2;          // 本机 frp 配置（frps 或 frpc，agent 按角色执行）
+  bool   frp_enabled   = 3;
+  repeated PluginSpec plugins = 4;   // manifest 期望版本
+  repeated TaskSpec    tasks    = 5; // 本机定时任务定义
 }
+message PluginSpec { string plugin_id = 1; string version = 2; string args_json = 3; }
+message TaskSpec   { string task_id = 1; string cron = 2; string plugin_id = 3;
+                     string args_json = 4; uint32 timeout_s = 5; }
+rpc FetchPlugin(PluginRequest) returns (stream Chunk);   // 流式分块 + sha256
+// MetricsBatch 增加：series（插件统一输出）+ frp 状态 + task_runs 结果
 ```
 
-> 分发走 **Agent 主动拉取**（心跳响应带 manifest 期望版本，Agent 发现缺/旧即发起下载）——Agent 在 NAT 后 Server 不能反推，靠心跳驱动契合现有 push 模型。
+`PushAck` 增加 `DesiredState desired_state`；`MetricsBatch` 增加 `FrpStatus frp`、`repeated TaskRunReport task_runs`，`series` 字段正式启用。
 
-## Server 新增：插件仓库
+## 二进制插件协议（本轮落实，Lua 后置）
 
-- `internal/plugin/`：插件注册（上传、版本、manifest）、指派（哪个插件发给哪台 Agent）、签名
-- 插件为**不可变发布物**：只允许新增版本，不可在线修改
+- **插件 = 可执行二进制**，标识 `plugin_id:version`，不可变发布物（只允许新增版本）。SHA-256 校验和 + manifest 白名单（只运行指派清单内 `plugin_id:version`）
+- **分发**：心跳响应带 manifest 期望版本 → 缺/旧 → `FetchPlugin` 流式下载 → 校验 → 缓存（目录 0700，按 `plugin_id/version`）
+- **执行**：`tokio::process::Command` 子进程。输入 JSON-line：`{"cmd":"run","args":{...}}`（一次性，定时任务）/ `{"cmd":"start","args":{...},"interval":60}`（长驻，采集）。输出 JSON-line：每行 `{"ts":...,"series":[{name,tags,fields}]}`，映射 proto `Series`
+- **隔离**：进程级（崩溃/死循环不杀 agent）、超时强杀、stderr 截断、退出码回传
 
-## 安全模型（最关键，独立评审）
+## FRP（frps + frpc 均由 agent 管理）
 
-**Server 向 Agent 分发可执行代码 = 变相远程执行能力。Server 被攻破 → 所有 Agent 沦陷。** 缓解措施：
+- **frps**：公网机 agent 管理本机 frps —— 写 `frps.toml`、启停 frps、拉 frps admin API（`/api/status`）拿隧道/流量 → 上报
+- **frpc**：内网机 agent 管理本机 frpc —— 同上，写 `frpc.toml`、启停、拉 admin API → 上报
+- Server 只存配置（`frp_configs` 表，frps 与每 agent frpc 一视同仁）、经 DesiredState 下发、收状态落 `frp_status` 表，前端展示
+- 配置渲染在 Server 侧完成（frpc.toml / frps.toml 字符串随 DesiredState 下发），Agent 不做模板逻辑
 
-1. **插件签名**：Server 私钥签名，Agent 内置公钥验签（防仓库污染 / 中间人）
-2. **双校验**：签名 + 校验和；Agent 只认 manifest 白名单内 `plugin_id + version`，未知插件拒绝执行
-3. **仅管理员上传**：上传入口二次鉴权
-4. **沙箱**：二进制插件默认无网络出站；Lua 禁全系统调用；后续可上 seccomp
-5. **失败隔离**：插件崩溃/死循环不影响 Agent 心跳；超时强杀、输出截断
+## 定时任务
 
-## 阶段二实现路线（待定稿）
+- **任务 = cron + 目标 agent + 插件引用 + args**，落 `tasks` 表；Server 只存定义与下发，**执行全在 agent 侧**
+- Agent 本地 cron（Rust `cron` crate）按任务定义触发一次性 `run`，结果（退出码 + 输出尾部 + 耗时）回传落 `task_runs` 表（审计）
+- 目标呈现：前端一律显示**主机名**，绝不下发/展示 agent_id
 
-1. Server 插件仓库 + 签名/校验和 + manifest 指派
-2. proto 扩展 `Control` 服务 + `Series` 启用
-3. Agent 插件管理器（拉取/校验/生命周期）
-4. Lua 运行时（mlua + 白名单 API）
-5. 二进制插件子进程协议 + 沙箱
-6. 内置插件化：host / docker 迁移为 Server 下发的内置插件
+## 采集迁移（host/docker/disk）
+
+- 采集逻辑编译为**内置插件**（随 agent 发布，manifest 内置），`interval` 驱动长驻；产出 `host.*` / `container.*` / `disk.*` Series
+- Server 把插件 Series **翻译回现有 `host_metrics/container_metrics/disk_metrics` 表**，前端与告警引擎零改动仍可工作
+
+## Server 数据模型（store 包新增表）
+
+`plugins`（id, name, kind, version, sha256, size, args_schema, created_at, UNIQUE(id,version)）·
+`tasks`（id, name, target_agent_id, cron, plugin_id, args_json, timeout_s, enabled, last_run_*, created_at, updated_at）·
+`task_runs`（id, task_id, agent_id, status, exit_code, output, started_at, finished_at）·
+`frp_configs`（kind, agent_id, server_addr, server_port, token, proxies JSON, state_version, enabled）·
+`frp_status`（agent_id, name, type, status, err, rx/tx_bytes, frp_running, frp_version, ts）
+
+## 安全模型
+
+**Server 分发可执行代码 = 变相远程执行能力。Server 被攻破 → 所有 Agent 沦陷。** 缓解措施：
+
+1. **校验和 + manifest 白名单**：Agent 只运行指派清单内 `plugin_id:version`，SHA-256 不符拒绝执行（本轮基线）
+2. **插件签名**（Server 私钥/Agent 公钥验签）：列为后续加固项（个人工具单机信任模型下可选）
+3. **仅管理员上传 / 配置**：面板全 admin；任务执行全量 `task_runs` 审计
+4. **失败隔离**：插件崩溃/死循环不影响心跳；超时强杀、输出截断
+5. **frp token**：存 SQLite（与飞书 secret 同级），仅经 gRPC 已鉴权通道下发，绝不过 REST 回传明文
+
+## 实现路线（S0–S4，每步独立验收，可停顿续接）
+
+1. **S0 设计定稿**：本文档更新（已完成）
+2. **S1 地基**：proto 扩展 + Agent 插件宿主（下载/校验/子进程/JSON-line）+ Server 插件仓库 / DesiredState / Series 落库 → hello 插件端到端
+3. **S2 采集迁移**：host/docker/disk 迁移为内置插件，server 翻译回现有表 → 面板数据与迁移前一致
+4. **S3 FRP**：agent frp 管理器 + server frp 配置存储/下发 + 前端 FRP 页
+5. **S4 定时任务**：任务模型 + agent 本地 cron + 结果回传 + 前端定时任务页

@@ -3,6 +3,7 @@ bin/
 web/dist/
 server/internal/webui/dist/
 agent/target/
+agent/plugins/*/target/
 
 # ---- 依赖 ----
 node_modules/

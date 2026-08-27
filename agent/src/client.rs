@@ -13,7 +13,7 @@ use tonic::Request;
 
 use crate::config::TlsConfig;
 use crate::pb::agent_client::AgentClient;
-use crate::pb::{MetricsBatch, PushAck, RegisterRequest};
+use crate::pb::{MetricsBatch, PluginRequest, PushAck, RegisterRequest};
 
 /// 注册用的节点自身信息。
 #[derive(Debug, Clone)]
@@ -78,4 +78,54 @@ impl Client {
             .insert("authorization", MetadataValue::from_str(&format!("Bearer {token}"))?);
         Ok(self.inner.push(req).await?.into_inner())
     }
+
+    /// 拉取插件二进制（流式分块），末尾分块携带完整 SHA-256，拼装后校验。
+    pub async fn fetch_plugin(&mut self, token: &str, plugin_id: &str, version: &str) -> Result<Vec<u8>> {
+        let mut req = Request::new(PluginRequest {
+            plugin_id: plugin_id.to_string(),
+            version: version.to_string(),
+        });
+        req.metadata_mut()
+            .insert("authorization", MetadataValue::from_str(&format!("Bearer {token}"))?);
+        let mut stream = self.inner.fetch_plugin(req).await?.into_inner();
+
+        let mut data = Vec::new();
+        let mut sha = String::new();
+        let mut size: u64 = 0;
+        while let Some(chunk) = stream.message().await? {
+            if !chunk.error.is_empty() {
+                anyhow::bail!("fetch plugin error: {}", chunk.error);
+            }
+            data.extend_from_slice(&chunk.data);
+            if !chunk.sha256.is_empty() {
+                sha = chunk.sha256;
+            }
+            if chunk.size > 0 {
+                size = chunk.size;
+            }
+        }
+        if data.is_empty() {
+            anyhow::bail!("empty plugin binary");
+        }
+        if size > 0 && data.len() as u64 != size {
+            anyhow::bail!("plugin size mismatch: got {}, want {}", data.len(), size);
+        }
+        if !sha.is_empty() {
+            use sha2::{Digest, Sha256};
+            let got = hex(&Sha256::digest(&data));
+            if got != sha {
+                anyhow::bail!("plugin sha256 mismatch: got {}, want {}", got, sha);
+            }
+        }
+        Ok(data)
+    }
+}
+
+/// bytes → 小写十六进制（sha2 摘要转 hex）。
+pub(crate) fn hex(data: &[u8]) -> String {
+    let mut s = String::with_capacity(data.len() * 2);
+    for b in data {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s
 }

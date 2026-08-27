@@ -131,6 +131,51 @@ CREATE TABLE IF NOT EXISTS alert_events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_agent_ts ON alert_events (agent_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_events_state  ON alert_events (state, started_at);
+
+-- ============ 阶段二：插件 / 任务 / frp ============
+
+CREATE TABLE IF NOT EXISTS plugins (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'binary',
+  version TEXT NOT NULL, sha256 TEXT NOT NULL, size BIGINT NOT NULL DEFAULT 0,
+  args_schema TEXT DEFAULT '', data BYTEA NOT NULL,
+  created_at BIGINT NOT NULL,
+  UNIQUE (id, version)
+);
+CREATE TABLE IF NOT EXISTS agent_plugins (
+  agent_id TEXT NOT NULL, plugin_id TEXT NOT NULL, version TEXT NOT NULL,
+  args_json TEXT DEFAULT '',
+  PRIMARY KEY (agent_id, plugin_id)
+);
+CREATE TABLE IF NOT EXISTS series (
+  agent_id TEXT NOT NULL, ts BIGINT NOT NULL, name TEXT NOT NULL,
+  tags TEXT NOT NULL DEFAULT '{}', fields TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_series_agent_name_ts ON series (agent_id, name, ts);
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT '',
+  target_agent_id TEXT DEFAULT '', cron TEXT NOT NULL, plugin_id TEXT NOT NULL,
+  args_json TEXT DEFAULT '', timeout_s BIGINT NOT NULL DEFAULT 60,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE, last_run_at BIGINT, last_status TEXT DEFAULT '',
+  last_output_tail TEXT DEFAULT '', created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS task_runs (
+  id TEXT PRIMARY KEY, task_id TEXT NOT NULL, agent_id TEXT NOT NULL,
+  status TEXT NOT NULL, exit_code INTEGER, output TEXT DEFAULT '',
+  started_at BIGINT NOT NULL, finished_at BIGINT
+);
+CREATE INDEX IF NOT EXISTS idx_task_runs_task ON task_runs (task_id, started_at);
+CREATE TABLE IF NOT EXISTS frp_configs (
+  kind TEXT NOT NULL, agent_id TEXT NOT NULL DEFAULT '',
+  server_addr TEXT DEFAULT '', server_port INTEGER DEFAULT 7000, token TEXT DEFAULT '',
+  proxies TEXT NOT NULL DEFAULT '[]', state_version BIGINT NOT NULL DEFAULT 1,
+  enabled BOOLEAN NOT NULL DEFAULT FALSE, updated_at BIGINT NOT NULL,
+  PRIMARY KEY (kind, agent_id)
+);
+CREATE TABLE IF NOT EXISTS frp_status (
+  agent_id TEXT PRIMARY KEY, running BOOLEAN NOT NULL DEFAULT FALSE,
+  frp_version TEXT DEFAULT '', error TEXT DEFAULT '',
+  tunnels TEXT NOT NULL DEFAULT '[]', ts BIGINT NOT NULL
+);
 `
 
 func (p *Postgres) migrate() error {
@@ -653,6 +698,322 @@ func (p *Postgres) ResolveEvent(ctx context.Context, id string, at time.Time) er
 func (p *Postgres) SetEventNotified(ctx context.Context, id string, at time.Time) error {
 	_, err := p.db.ExecContext(ctx, `UPDATE alert_events SET notified_at=$1 WHERE id=$2`, at.Unix(), id)
 	return err
+}
+
+// ---- 阶段二：插件仓库 / 指派 / Series ----
+
+func (p *Postgres) SavePlugin(ctx context.Context, pl *Plugin) error {
+	if pl.Data == nil {
+		pl.Data = []byte{}
+	}
+	if pl.CreatedAt.IsZero() {
+		pl.CreatedAt = time.Now().UTC()
+	}
+	_, err := p.db.ExecContext(ctx, `
+INSERT INTO plugins (id, name, kind, version, sha256, size, args_schema, data, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		pl.ID, pl.Name, pl.Kind, pl.Version, pl.SHA256, pl.Size, pl.ArgsSchema, pl.Data, pl.CreatedAt.Unix())
+	return err
+}
+
+func (p *Postgres) ListPlugins(ctx context.Context) ([]*Plugin, error) {
+	rows, err := p.db.QueryContext(ctx, `
+SELECT id, name, kind, version, sha256, size, args_schema, created_at
+FROM plugins ORDER BY id, version`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]*Plugin, 0, 8)
+	for rows.Next() {
+		var pl Plugin
+		var createdAt int64
+		if err := rows.Scan(&pl.ID, &pl.Name, &pl.Kind, &pl.Version, &pl.SHA256, &pl.Size, &pl.ArgsSchema, &createdAt); err != nil {
+			return nil, err
+		}
+		pl.CreatedAt = time.Unix(createdAt, 0).UTC()
+		out = append(out, &pl)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) GetPlugin(ctx context.Context, id, version string) (*Plugin, error) {
+	var pl Plugin
+	var createdAt int64
+	err := p.db.QueryRowContext(ctx, `
+SELECT id, name, kind, version, sha256, size, args_schema, data, created_at
+FROM plugins WHERE id = $1 AND version = $2`, id, version).
+		Scan(&pl.ID, &pl.Name, &pl.Kind, &pl.Version, &pl.SHA256, &pl.Size, &pl.ArgsSchema, &pl.Data, &createdAt)
+	if err != nil {
+		return nil, err
+	}
+	pl.CreatedAt = time.Unix(createdAt, 0).UTC()
+	return &pl, nil
+}
+
+func (p *Postgres) AssignPlugin(ctx context.Context, ap *AgentPlugin) error {
+	_, err := p.db.ExecContext(ctx, `
+INSERT INTO agent_plugins (agent_id, plugin_id, version, args_json)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (agent_id, plugin_id) DO UPDATE SET
+  version=EXCLUDED.version, args_json=EXCLUDED.args_json`,
+		ap.AgentID, ap.PluginID, ap.Version, ap.ArgsJSON)
+	return err
+}
+
+func (p *Postgres) AgentPlugins(ctx context.Context, agentID string) ([]*AgentPlugin, error) {
+	rows, err := p.db.QueryContext(ctx, `
+SELECT agent_id, plugin_id, version, args_json
+FROM agent_plugins WHERE agent_id = $1 ORDER BY plugin_id`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]*AgentPlugin, 0, 8)
+	for rows.Next() {
+		var ap AgentPlugin
+		if err := rows.Scan(&ap.AgentID, &ap.PluginID, &ap.Version, &ap.ArgsJSON); err != nil {
+			return nil, err
+		}
+		out = append(out, &ap)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) AppendSeries(ctx context.Context, agentID string, items []*Series) error {
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	for _, it := range items {
+		tags, _ := json.Marshal(it.Tags)
+		fields, _ := json.Marshal(it.Fields)
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO series (agent_id, ts, name, tags, fields) VALUES ($1, $2, $3, $4, $5)`,
+			agentID, it.TS.Unix(), it.Name, string(tags), string(fields)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// ---- 阶段二：定时任务 ----
+
+const pgTaskCols = `id, name, description, target_agent_id, cron, plugin_id, args_json,
+  timeout_s, enabled, last_run_at, last_status, last_output_tail, created_at, updated_at`
+
+// scanTaskPG 扫一行任务（PG 的 BOOLEAN 直接扫入 bool）。
+func scanTaskPG(scan func(dest ...any) error) (*Task, error) {
+	var t Task
+	var createdAt, updatedAt int64
+	var lastRunAt sql.NullInt64
+	if err := scan(&t.ID, &t.Name, &t.Description, &t.TargetAgentID, &t.Cron, &t.PluginID, &t.ArgsJSON,
+		&t.TimeoutS, &t.Enabled, &lastRunAt, &t.LastStatus, &t.LastOutputTail, &createdAt, &updatedAt); err != nil {
+		return nil, err
+	}
+	t.CreatedAt = time.Unix(createdAt, 0).UTC()
+	t.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	if lastRunAt.Valid {
+		v := time.Unix(lastRunAt.Int64, 0).UTC()
+		t.LastRunAt = &v
+	}
+	return &t, nil
+}
+
+func (p *Postgres) SaveTask(ctx context.Context, t *Task) error {
+	now := time.Now().Unix()
+	if t.ID == "" {
+		t.ID = newUUID()
+		t.CreatedAt = time.Unix(now, 0).UTC()
+		t.UpdatedAt = t.CreatedAt
+		_, err := p.db.ExecContext(ctx, `
+INSERT INTO tasks (id, name, description, target_agent_id, cron, plugin_id, args_json, timeout_s, enabled, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+			t.ID, t.Name, t.Description, t.TargetAgentID, t.Cron, t.PluginID, t.ArgsJSON,
+			t.TimeoutS, t.Enabled, now, now)
+		return err
+	}
+	t.UpdatedAt = time.Unix(now, 0).UTC()
+	_, err := p.db.ExecContext(ctx, `
+UPDATE tasks SET name=$1, description=$2, target_agent_id=$3, cron=$4, plugin_id=$5, args_json=$6, timeout_s=$7, enabled=$8, updated_at=$9
+WHERE id=$10`,
+		t.Name, t.Description, t.TargetAgentID, t.Cron, t.PluginID, t.ArgsJSON,
+		t.TimeoutS, t.Enabled, now, t.ID)
+	return err
+}
+
+func (p *Postgres) ListTasks(ctx context.Context) ([]*Task, error) {
+	rows, err := p.db.QueryContext(ctx, `SELECT `+pgTaskCols+` FROM tasks ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]*Task, 0, 8)
+	for rows.Next() {
+		t, err := scanTaskPG(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) GetTask(ctx context.Context, id string) (*Task, error) {
+	t, err := scanTaskPG(p.db.QueryRowContext(ctx, `SELECT `+pgTaskCols+` FROM tasks WHERE id = $1`, id).Scan)
+	if err == sql.ErrNoRows {
+		return nil, sql.ErrNoRows
+	}
+	return t, err
+}
+
+func (p *Postgres) DeleteTask(ctx context.Context, id string) error {
+	_, err := p.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = $1`, id)
+	return err
+}
+
+func (p *Postgres) AppendTaskRun(ctx context.Context, r *TaskRun) error {
+	if r.ID == "" {
+		r.ID = newUUID()
+	}
+	_, err := p.db.ExecContext(ctx, `
+INSERT INTO task_runs (id, task_id, agent_id, status, exit_code, output, started_at, finished_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		r.ID, r.TaskID, r.AgentID, r.Status, r.ExitCode, r.Output, r.StartedAt.Unix(), nullInt64(r.FinishedAt))
+	return err
+}
+
+func (p *Postgres) QueryTaskRuns(ctx context.Context, taskID string, limit int) ([]*TaskRun, error) {
+	rows, err := p.db.QueryContext(ctx, `
+SELECT id, task_id, agent_id, status, exit_code, output, started_at,
+       COALESCE(finished_at, 0)
+FROM task_runs WHERE task_id = $1 ORDER BY started_at DESC LIMIT $2`, taskID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]*TaskRun, 0, 32)
+	for rows.Next() {
+		var r TaskRun
+		var startedAt, finishedAt int64
+		var exitCode sql.NullInt64
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.AgentID, &r.Status, &exitCode, &r.Output, &startedAt, &finishedAt); err != nil {
+			return nil, err
+		}
+		if exitCode.Valid {
+			v := int32(exitCode.Int64)
+			r.ExitCode = &v
+		}
+		r.StartedAt = time.Unix(startedAt, 0).UTC()
+		if finishedAt > 0 {
+			v := time.Unix(finishedAt, 0).UTC()
+			r.FinishedAt = &v
+		}
+		out = append(out, &r)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) UpdateTaskLastRun(ctx context.Context, taskID, status, outputTail string, at time.Time) error {
+	_, err := p.db.ExecContext(ctx, `
+UPDATE tasks SET last_run_at=$1, last_status=$2, last_output_tail=$3 WHERE id=$4`,
+		at.Unix(), status, outputTail, taskID)
+	return err
+}
+
+// ---- 阶段二：frp 配置 / 状态 ----
+
+func (p *Postgres) SaveFrpConfig(ctx context.Context, c *FrpConfig) error {
+	proxies, _ := json.Marshal(c.Proxies)
+	if c.StateVersion == 0 {
+		c.StateVersion = 1
+	}
+	_, err := p.db.ExecContext(ctx, `
+INSERT INTO frp_configs (kind, agent_id, server_addr, server_port, token, proxies, state_version, enabled, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (kind, agent_id) DO UPDATE SET
+  server_addr=EXCLUDED.server_addr, server_port=EXCLUDED.server_port, token=EXCLUDED.token,
+  proxies=EXCLUDED.proxies, state_version=EXCLUDED.state_version, enabled=EXCLUDED.enabled,
+  updated_at=EXCLUDED.updated_at`,
+		c.Kind, c.AgentID, c.ServerAddr, c.ServerPort, c.Token, string(proxies),
+		c.StateVersion, c.Enabled, time.Now().Unix())
+	return err
+}
+
+func (p *Postgres) GetFrpConfig(ctx context.Context, kind, agentID string) (*FrpConfig, error) {
+	var c FrpConfig
+	var proxies string
+	var stateVersion, updatedAt int64
+	err := p.db.QueryRowContext(ctx, `
+SELECT kind, agent_id, server_addr, server_port, token, proxies, state_version, enabled, updated_at
+FROM frp_configs WHERE kind = $1 AND agent_id = $2`, kind, agentID).
+		Scan(&c.Kind, &c.AgentID, &c.ServerAddr, &c.ServerPort, &c.Token, &proxies, &stateVersion, &c.Enabled, &updatedAt)
+	if err != nil {
+		return nil, err
+	}
+	c.Proxies = parseTunnels(proxies)
+	c.StateVersion = uint64(stateVersion)
+	c.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	return &c, nil
+}
+
+func (p *Postgres) ListFrpConfigs(ctx context.Context) ([]*FrpConfig, error) {
+	rows, err := p.db.QueryContext(ctx, `
+SELECT kind, agent_id, server_addr, server_port, token, proxies, state_version, enabled, updated_at
+FROM frp_configs ORDER BY kind, agent_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]*FrpConfig, 0, 4)
+	for rows.Next() {
+		var c FrpConfig
+		var proxies string
+		var stateVersion, updatedAt int64
+		if err := rows.Scan(&c.Kind, &c.AgentID, &c.ServerAddr, &c.ServerPort, &c.Token, &proxies,
+			&stateVersion, &c.Enabled, &updatedAt); err != nil {
+			return nil, err
+		}
+		c.Proxies = parseTunnels(proxies)
+		c.StateVersion = uint64(stateVersion)
+		c.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+		out = append(out, &c)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) UpsertFrpStatus(ctx context.Context, agentID string, st *FrpStatus) error {
+	tunnels, _ := json.Marshal(st.Tunnels)
+	_, err := p.db.ExecContext(ctx, `
+INSERT INTO frp_status (agent_id, running, frp_version, error, tunnels, ts)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (agent_id) DO UPDATE SET
+  running=EXCLUDED.running, frp_version=EXCLUDED.frp_version, error=EXCLUDED.error,
+  tunnels=EXCLUDED.tunnels, ts=EXCLUDED.ts`,
+		agentID, st.Running, st.FrpVersion, st.Error, string(tunnels), st.TS.Unix())
+	return err
+}
+
+func (p *Postgres) QueryFrpStatus(ctx context.Context, agentID string) (*FrpStatus, error) {
+	var st FrpStatus
+	var ts int64
+	var tunnels string
+	err := p.db.QueryRowContext(ctx, `
+SELECT running, frp_version, error, tunnels, ts
+FROM frp_status WHERE agent_id = $1`, agentID).
+		Scan(&st.Running, &st.FrpVersion, &st.Error, &tunnels, &ts)
+	if err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal([]byte(tunnels), &st.Tunnels)
+	st.TS = time.Unix(ts, 0).UTC()
+	return &st, nil
 }
 
 func (p *Postgres) Cleanup(ctx context.Context, retention time.Duration) (int64, error) {

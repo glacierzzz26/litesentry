@@ -9,6 +9,7 @@ mod collector;
 mod config;
 mod docker;
 mod ip;
+mod plugin;
 
 pub mod pb {
     tonic::include_proto!("litesentry");
@@ -70,11 +71,14 @@ async fn main() -> Result<()> {
     };
     tracing::info!("agent {agent_id} → {} (interval {}s, 心跳=上报)", cfg.server, cfg.interval_secs);
 
+    let mut host = plugin::PluginHost::new(&cfg.plugin_dir, cfg.interval_secs);
+    let mut applied_version: u64 = 0; // 已应用的 DesiredState 版本（心跳下发，等于即跳过）
+
     let mut ticker = time::interval(Duration::from_secs(cfg.interval_secs));
     loop {
         ticker.tick().await;
 
-        let host = collector.collect();
+        let host_sample = collector.collect();
         let containers = match dcollector.collect().await {
             Ok(v) => v,
             Err(e) => {
@@ -83,9 +87,25 @@ async fn main() -> Result<()> {
             }
         };
 
-        let batch = build_batch(&agent_id, &host, &containers);
+        // 汇入插件系列（阶段二）
+        let mut batch = build_batch(&agent_id, &host_sample, &containers);
+        batch.series = host.drain_series();
+
         match client.push(&cfg.token, batch).await {
-            Ok(ack) => tracing::debug!("pushed server_time={}", ack.server_time),
+            Ok(ack) => {
+                if let Some(ds) = ack.desired_state {
+                    if ds.state_version != applied_version {
+                        match host.apply(&mut client, &cfg.token, &ds.plugins).await {
+                            Ok(()) => {
+                                applied_version = ds.state_version;
+                                tracing::info!("已应用 DesiredState v{}（{} 个插件）", ds.state_version, ds.plugins.len());
+                            }
+                            Err(e) => tracing::warn!("应用 DesiredState 失败: {e}"),
+                        }
+                    }
+                }
+                tracing::debug!("pushed server_time={}", ack.server_time);
+            }
             Err(e) => tracing::warn!("push 失败: {e}"),
         }
     }
@@ -156,6 +176,8 @@ fn build_batch(
         ts: chrono::Utc::now().timestamp() as u64,
         host: Some(pb_host),
         containers: pb_containers,
-        series: Vec::new(), // 阶段二启用
+        series: Vec::new(), // 阶段二：主循环汇入插件系列
+        frp: None,          // 阶段二 S3：frp 状态
+        task_runs: Vec::new(), // 阶段二 S4：定时任务执行结果
     }
 }

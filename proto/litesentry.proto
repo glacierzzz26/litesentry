@@ -83,10 +83,77 @@ message ContainerMetrics {
 // ============ 通用插件数据（阶段二启用，阶段一预留） ============
 
 message Series {
-  string                name   = 1;   // e.g. "postgres.connections"
-  map<string, string>   tags   = 2;   // 维度: instance, db...
-  map<string, double>   fields = 3;   // 指标: active=12
+  string                name   = 1;   // e.g. "host.cpu"
+  map<string, string>   tags   = 2;   // 维度: agent_id, mount, container_id...
+  map<string, double>   fields = 3;   // 指标: pct=12.3
   uint64                ts     = 4;
+}
+
+// ============ 控制通道（阶段二） ============
+
+// 插件期望清单（manifest）：Server 指派本机应运行的插件与版本。
+message PluginSpec {
+  string plugin_id = 1;
+  string version   = 2;
+  string args_json = 3;   // 插件参数（JSON 字符串）
+}
+
+// 定时任务定义：由目标 agent 本地 cron 触发执行。
+message TaskSpec {
+  string task_id   = 1;
+  string cron      = 2;   // 标准 5 段 cron
+  string plugin_id = 3;
+  string args_json = 4;
+  uint32 timeout_s = 5;
+}
+
+// 心跳响应下发的期望状态：Agent 发现 state_version != 已应用版本时重新应用。
+message DesiredState {
+  uint64 state_version = 1;           // 全局递增，任一配置变更联动 +1
+  string frp_toml      = 2;           // 本机要运行的 frp 配置（frps 或 frpc），空串 = 不管理
+  bool   frp_enabled   = 3;           // 是否启用 frp 进程管理
+  repeated PluginSpec plugins = 4;    // manifest 期望版本
+  repeated TaskSpec    tasks    = 5;  // 本机定时任务定义
+}
+
+// 拉插件二进制请求 / 流式分块。
+message PluginRequest {
+  string plugin_id = 1;
+  string version   = 2;
+}
+message Chunk {
+  bytes  data   = 1;   // 二进制分块
+  string sha256 = 2;   // 完整二进制 SHA-256（末尾分块携带，用于校验）
+  uint64 size   = 3;   // 完整二进制字节数（末尾分块携带）
+  string error  = 4;   // 错误时返回
+}
+
+// ============ frp 状态（agent 上报） ============
+
+message FrpTunnelStatus {
+  string name      = 1;
+  string type      = 2;   // tcp | udp | http | https | stcp ...
+  string status    = 3;   // online | offline | error
+  string err       = 4;
+  uint64 rx_bytes  = 5;
+  uint64 tx_bytes  = 6;
+}
+message FrpStatus {
+  bool   running     = 1;   // frp 进程是否存活
+  string frp_version = 2;
+  string error       = 3;   // 未安装 / 启动失败等原因
+  repeated FrpTunnelStatus tunnels = 4;
+}
+
+// ============ 定时任务执行结果（agent 上报） ============
+
+message TaskRunReport {
+  string task_id     = 1;
+  uint64 started_at  = 2;
+  uint64 finished_at = 3;
+  string status      = 4;   // ok | failed | timeout | skipped
+  int32  exit_code   = 5;
+  string output      = 6;   // stdout/stderr 截断尾部
 }
 
 // ============ 上报批 ============
@@ -96,12 +163,15 @@ message MetricsBatch {
   uint64 ts                   = 2;   // unix 秒
   HostMetrics host            = 3;
   repeated ContainerMetrics containers = 4;
-  repeated Series series      = 5;   // 阶段二启用，阶段一不填充
+  repeated Series series      = 5;   // 插件统一输出（阶段二启用）
+  FrpStatus frp               = 6;   // 本机 frp 隧道状态（阶段二）
+  repeated TaskRunReport task_runs = 7;   // 定时任务执行结果（阶段二）
 }
 
 message PushAck {
   string server_time = 1;
   string message     = 2;
+  DesiredState desired_state = 3;   // 心跳驱动下发：frp 配置 + 插件 manifest + 任务定义
 }
 
 // ============ 注册 ============
@@ -126,8 +196,10 @@ message RegisterReply {
 service Agent {
   // 节点注册：Agent 启动时用自身机器信息换取（或复用）agent_id
   rpc Register(RegisterRequest) returns (RegisterReply);
-  // 常规定时上报（默认 60s/批，即心跳）
+  // 常规定时上报（默认 60s/批，即心跳）；响应携带 DesiredState 下发配置
   rpc Push(MetricsBatch) returns (PushAck);
-  // 可选：长连接流式，实时性要求高时启用（阶段二插件分发复用此通道）
+  // 拉插件二进制（流式分块）：Agent 在 DesiredState 发现缺/旧时主动调用
+  rpc FetchPlugin(PluginRequest) returns (stream Chunk);
+  // 可选：长连接流式，实时性要求高时启用（预留）
   rpc Stream(stream MetricsBatch) returns (stream PushAck);
 }

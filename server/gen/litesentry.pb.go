@@ -590,9 +590,9 @@ func (x *ContainerMetrics) GetNet() *Net {
 
 type Series struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                                                                 // e.g. "postgres.connections"
-	Tags          map[string]string      `protobuf:"bytes,2,rep,name=tags,proto3" json:"tags,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`       // 维度: instance, db...
-	Fields        map[string]float64     `protobuf:"bytes,3,rep,name=fields,proto3" json:"fields,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"fixed64,2,opt,name=value"` // 指标: active=12
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                                                                 // e.g. "host.cpu"
+	Tags          map[string]string      `protobuf:"bytes,2,rep,name=tags,proto3" json:"tags,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`       // 维度: agent_id, mount, container_id...
+	Fields        map[string]float64     `protobuf:"bytes,3,rep,name=fields,proto3" json:"fields,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"fixed64,2,opt,name=value"` // 指标: pct=12.3
 	Ts            uint64                 `protobuf:"varint,4,opt,name=ts,proto3" json:"ts,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -656,20 +656,594 @@ func (x *Series) GetTs() uint64 {
 	return 0
 }
 
+// 插件期望清单（manifest）：Server 指派本机应运行的插件与版本。
+type PluginSpec struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PluginId      string                 `protobuf:"bytes,1,opt,name=plugin_id,json=pluginId,proto3" json:"plugin_id,omitempty"`
+	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	ArgsJson      string                 `protobuf:"bytes,3,opt,name=args_json,json=argsJson,proto3" json:"args_json,omitempty"` // 插件参数（JSON 字符串）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PluginSpec) Reset() {
+	*x = PluginSpec{}
+	mi := &file_litesentry_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PluginSpec) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PluginSpec) ProtoMessage() {}
+
+func (x *PluginSpec) ProtoReflect() protoreflect.Message {
+	mi := &file_litesentry_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PluginSpec.ProtoReflect.Descriptor instead.
+func (*PluginSpec) Descriptor() ([]byte, []int) {
+	return file_litesentry_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *PluginSpec) GetPluginId() string {
+	if x != nil {
+		return x.PluginId
+	}
+	return ""
+}
+
+func (x *PluginSpec) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *PluginSpec) GetArgsJson() string {
+	if x != nil {
+		return x.ArgsJson
+	}
+	return ""
+}
+
+// 定时任务定义：由目标 agent 本地 cron 触发执行。
+type TaskSpec struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Cron          string                 `protobuf:"bytes,2,opt,name=cron,proto3" json:"cron,omitempty"` // 标准 5 段 cron
+	PluginId      string                 `protobuf:"bytes,3,opt,name=plugin_id,json=pluginId,proto3" json:"plugin_id,omitempty"`
+	ArgsJson      string                 `protobuf:"bytes,4,opt,name=args_json,json=argsJson,proto3" json:"args_json,omitempty"`
+	TimeoutS      uint32                 `protobuf:"varint,5,opt,name=timeout_s,json=timeoutS,proto3" json:"timeout_s,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskSpec) Reset() {
+	*x = TaskSpec{}
+	mi := &file_litesentry_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskSpec) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskSpec) ProtoMessage() {}
+
+func (x *TaskSpec) ProtoReflect() protoreflect.Message {
+	mi := &file_litesentry_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskSpec.ProtoReflect.Descriptor instead.
+func (*TaskSpec) Descriptor() ([]byte, []int) {
+	return file_litesentry_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *TaskSpec) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TaskSpec) GetCron() string {
+	if x != nil {
+		return x.Cron
+	}
+	return ""
+}
+
+func (x *TaskSpec) GetPluginId() string {
+	if x != nil {
+		return x.PluginId
+	}
+	return ""
+}
+
+func (x *TaskSpec) GetArgsJson() string {
+	if x != nil {
+		return x.ArgsJson
+	}
+	return ""
+}
+
+func (x *TaskSpec) GetTimeoutS() uint32 {
+	if x != nil {
+		return x.TimeoutS
+	}
+	return 0
+}
+
+// 心跳响应下发的期望状态：Agent 发现 state_version != 已应用版本时重新应用。
+type DesiredState struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	StateVersion  uint64                 `protobuf:"varint,1,opt,name=state_version,json=stateVersion,proto3" json:"state_version,omitempty"` // 全局递增，任一配置变更联动 +1
+	FrpToml       string                 `protobuf:"bytes,2,opt,name=frp_toml,json=frpToml,proto3" json:"frp_toml,omitempty"`                 // 本机要运行的 frp 配置（frps 或 frpc），空串 = 不管理
+	FrpEnabled    bool                   `protobuf:"varint,3,opt,name=frp_enabled,json=frpEnabled,proto3" json:"frp_enabled,omitempty"`       // 是否启用 frp 进程管理
+	Plugins       []*PluginSpec          `protobuf:"bytes,4,rep,name=plugins,proto3" json:"plugins,omitempty"`                                // manifest 期望版本
+	Tasks         []*TaskSpec            `protobuf:"bytes,5,rep,name=tasks,proto3" json:"tasks,omitempty"`                                    // 本机定时任务定义
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DesiredState) Reset() {
+	*x = DesiredState{}
+	mi := &file_litesentry_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DesiredState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DesiredState) ProtoMessage() {}
+
+func (x *DesiredState) ProtoReflect() protoreflect.Message {
+	mi := &file_litesentry_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DesiredState.ProtoReflect.Descriptor instead.
+func (*DesiredState) Descriptor() ([]byte, []int) {
+	return file_litesentry_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *DesiredState) GetStateVersion() uint64 {
+	if x != nil {
+		return x.StateVersion
+	}
+	return 0
+}
+
+func (x *DesiredState) GetFrpToml() string {
+	if x != nil {
+		return x.FrpToml
+	}
+	return ""
+}
+
+func (x *DesiredState) GetFrpEnabled() bool {
+	if x != nil {
+		return x.FrpEnabled
+	}
+	return false
+}
+
+func (x *DesiredState) GetPlugins() []*PluginSpec {
+	if x != nil {
+		return x.Plugins
+	}
+	return nil
+}
+
+func (x *DesiredState) GetTasks() []*TaskSpec {
+	if x != nil {
+		return x.Tasks
+	}
+	return nil
+}
+
+// 拉插件二进制请求 / 流式分块。
+type PluginRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PluginId      string                 `protobuf:"bytes,1,opt,name=plugin_id,json=pluginId,proto3" json:"plugin_id,omitempty"`
+	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PluginRequest) Reset() {
+	*x = PluginRequest{}
+	mi := &file_litesentry_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PluginRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PluginRequest) ProtoMessage() {}
+
+func (x *PluginRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_litesentry_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PluginRequest.ProtoReflect.Descriptor instead.
+func (*PluginRequest) Descriptor() ([]byte, []int) {
+	return file_litesentry_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *PluginRequest) GetPluginId() string {
+	if x != nil {
+		return x.PluginId
+	}
+	return ""
+}
+
+func (x *PluginRequest) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+type Chunk struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`     // 二进制分块
+	Sha256        string                 `protobuf:"bytes,2,opt,name=sha256,proto3" json:"sha256,omitempty"` // 完整二进制 SHA-256（末尾分块携带，用于校验）
+	Size          uint64                 `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`    // 完整二进制字节数（末尾分块携带）
+	Error         string                 `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`   // 错误时返回
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Chunk) Reset() {
+	*x = Chunk{}
+	mi := &file_litesentry_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Chunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Chunk) ProtoMessage() {}
+
+func (x *Chunk) ProtoReflect() protoreflect.Message {
+	mi := &file_litesentry_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Chunk.ProtoReflect.Descriptor instead.
+func (*Chunk) Descriptor() ([]byte, []int) {
+	return file_litesentry_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *Chunk) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *Chunk) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
+func (x *Chunk) GetSize() uint64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+func (x *Chunk) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type FrpTunnelStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`     // tcp | udp | http | https | stcp ...
+	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"` // online | offline | error
+	Err           string                 `protobuf:"bytes,4,opt,name=err,proto3" json:"err,omitempty"`
+	RxBytes       uint64                 `protobuf:"varint,5,opt,name=rx_bytes,json=rxBytes,proto3" json:"rx_bytes,omitempty"`
+	TxBytes       uint64                 `protobuf:"varint,6,opt,name=tx_bytes,json=txBytes,proto3" json:"tx_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FrpTunnelStatus) Reset() {
+	*x = FrpTunnelStatus{}
+	mi := &file_litesentry_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FrpTunnelStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FrpTunnelStatus) ProtoMessage() {}
+
+func (x *FrpTunnelStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_litesentry_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FrpTunnelStatus.ProtoReflect.Descriptor instead.
+func (*FrpTunnelStatus) Descriptor() ([]byte, []int) {
+	return file_litesentry_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *FrpTunnelStatus) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *FrpTunnelStatus) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *FrpTunnelStatus) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *FrpTunnelStatus) GetErr() string {
+	if x != nil {
+		return x.Err
+	}
+	return ""
+}
+
+func (x *FrpTunnelStatus) GetRxBytes() uint64 {
+	if x != nil {
+		return x.RxBytes
+	}
+	return 0
+}
+
+func (x *FrpTunnelStatus) GetTxBytes() uint64 {
+	if x != nil {
+		return x.TxBytes
+	}
+	return 0
+}
+
+type FrpStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Running       bool                   `protobuf:"varint,1,opt,name=running,proto3" json:"running,omitempty"` // frp 进程是否存活
+	FrpVersion    string                 `protobuf:"bytes,2,opt,name=frp_version,json=frpVersion,proto3" json:"frp_version,omitempty"`
+	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"` // 未安装 / 启动失败等原因
+	Tunnels       []*FrpTunnelStatus     `protobuf:"bytes,4,rep,name=tunnels,proto3" json:"tunnels,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FrpStatus) Reset() {
+	*x = FrpStatus{}
+	mi := &file_litesentry_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FrpStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FrpStatus) ProtoMessage() {}
+
+func (x *FrpStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_litesentry_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FrpStatus.ProtoReflect.Descriptor instead.
+func (*FrpStatus) Descriptor() ([]byte, []int) {
+	return file_litesentry_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *FrpStatus) GetRunning() bool {
+	if x != nil {
+		return x.Running
+	}
+	return false
+}
+
+func (x *FrpStatus) GetFrpVersion() string {
+	if x != nil {
+		return x.FrpVersion
+	}
+	return ""
+}
+
+func (x *FrpStatus) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *FrpStatus) GetTunnels() []*FrpTunnelStatus {
+	if x != nil {
+		return x.Tunnels
+	}
+	return nil
+}
+
+type TaskRunReport struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	StartedAt     uint64                 `protobuf:"varint,2,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	FinishedAt    uint64                 `protobuf:"varint,3,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
+	Status        string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"` // ok | failed | timeout | skipped
+	ExitCode      int32                  `protobuf:"varint,5,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	Output        string                 `protobuf:"bytes,6,opt,name=output,proto3" json:"output,omitempty"` // stdout/stderr 截断尾部
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskRunReport) Reset() {
+	*x = TaskRunReport{}
+	mi := &file_litesentry_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskRunReport) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskRunReport) ProtoMessage() {}
+
+func (x *TaskRunReport) ProtoReflect() protoreflect.Message {
+	mi := &file_litesentry_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskRunReport.ProtoReflect.Descriptor instead.
+func (*TaskRunReport) Descriptor() ([]byte, []int) {
+	return file_litesentry_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *TaskRunReport) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TaskRunReport) GetStartedAt() uint64 {
+	if x != nil {
+		return x.StartedAt
+	}
+	return 0
+}
+
+func (x *TaskRunReport) GetFinishedAt() uint64 {
+	if x != nil {
+		return x.FinishedAt
+	}
+	return 0
+}
+
+func (x *TaskRunReport) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *TaskRunReport) GetExitCode() int32 {
+	if x != nil {
+		return x.ExitCode
+	}
+	return 0
+}
+
+func (x *TaskRunReport) GetOutput() string {
+	if x != nil {
+		return x.Output
+	}
+	return ""
+}
+
 type MetricsBatch struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
 	Ts            uint64                 `protobuf:"varint,2,opt,name=ts,proto3" json:"ts,omitempty"` // unix 秒
 	Host          *HostMetrics           `protobuf:"bytes,3,opt,name=host,proto3" json:"host,omitempty"`
 	Containers    []*ContainerMetrics    `protobuf:"bytes,4,rep,name=containers,proto3" json:"containers,omitempty"`
-	Series        []*Series              `protobuf:"bytes,5,rep,name=series,proto3" json:"series,omitempty"` // 阶段二启用，阶段一不填充
+	Series        []*Series              `protobuf:"bytes,5,rep,name=series,proto3" json:"series,omitempty"`                     // 插件统一输出（阶段二启用）
+	Frp           *FrpStatus             `protobuf:"bytes,6,opt,name=frp,proto3" json:"frp,omitempty"`                           // 本机 frp 隧道状态（阶段二）
+	TaskRuns      []*TaskRunReport       `protobuf:"bytes,7,rep,name=task_runs,json=taskRuns,proto3" json:"task_runs,omitempty"` // 定时任务执行结果（阶段二）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *MetricsBatch) Reset() {
 	*x = MetricsBatch{}
-	mi := &file_litesentry_proto_msgTypes[8]
+	mi := &file_litesentry_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -681,7 +1255,7 @@ func (x *MetricsBatch) String() string {
 func (*MetricsBatch) ProtoMessage() {}
 
 func (x *MetricsBatch) ProtoReflect() protoreflect.Message {
-	mi := &file_litesentry_proto_msgTypes[8]
+	mi := &file_litesentry_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -694,7 +1268,7 @@ func (x *MetricsBatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetricsBatch.ProtoReflect.Descriptor instead.
 func (*MetricsBatch) Descriptor() ([]byte, []int) {
-	return file_litesentry_proto_rawDescGZIP(), []int{8}
+	return file_litesentry_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *MetricsBatch) GetAgentId() string {
@@ -732,17 +1306,32 @@ func (x *MetricsBatch) GetSeries() []*Series {
 	return nil
 }
 
+func (x *MetricsBatch) GetFrp() *FrpStatus {
+	if x != nil {
+		return x.Frp
+	}
+	return nil
+}
+
+func (x *MetricsBatch) GetTaskRuns() []*TaskRunReport {
+	if x != nil {
+		return x.TaskRuns
+	}
+	return nil
+}
+
 type PushAck struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ServerTime    string                 `protobuf:"bytes,1,opt,name=server_time,json=serverTime,proto3" json:"server_time,omitempty"`
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	DesiredState  *DesiredState          `protobuf:"bytes,3,opt,name=desired_state,json=desiredState,proto3" json:"desired_state,omitempty"` // 心跳驱动下发：frp 配置 + 插件 manifest + 任务定义
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PushAck) Reset() {
 	*x = PushAck{}
-	mi := &file_litesentry_proto_msgTypes[9]
+	mi := &file_litesentry_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -754,7 +1343,7 @@ func (x *PushAck) String() string {
 func (*PushAck) ProtoMessage() {}
 
 func (x *PushAck) ProtoReflect() protoreflect.Message {
-	mi := &file_litesentry_proto_msgTypes[9]
+	mi := &file_litesentry_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -767,7 +1356,7 @@ func (x *PushAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PushAck.ProtoReflect.Descriptor instead.
 func (*PushAck) Descriptor() ([]byte, []int) {
-	return file_litesentry_proto_rawDescGZIP(), []int{9}
+	return file_litesentry_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *PushAck) GetServerTime() string {
@@ -782,6 +1371,13 @@ func (x *PushAck) GetMessage() string {
 		return x.Message
 	}
 	return ""
+}
+
+func (x *PushAck) GetDesiredState() *DesiredState {
+	if x != nil {
+		return x.DesiredState
+	}
+	return nil
 }
 
 // 节点注册请求：携带机器自身信息，由 Server 分发 / 复用 agent_id。
@@ -799,7 +1395,7 @@ type RegisterRequest struct {
 
 func (x *RegisterRequest) Reset() {
 	*x = RegisterRequest{}
-	mi := &file_litesentry_proto_msgTypes[10]
+	mi := &file_litesentry_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -811,7 +1407,7 @@ func (x *RegisterRequest) String() string {
 func (*RegisterRequest) ProtoMessage() {}
 
 func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_litesentry_proto_msgTypes[10]
+	mi := &file_litesentry_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -824,7 +1420,7 @@ func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterRequest.ProtoReflect.Descriptor instead.
 func (*RegisterRequest) Descriptor() ([]byte, []int) {
-	return file_litesentry_proto_rawDescGZIP(), []int{10}
+	return file_litesentry_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *RegisterRequest) GetHostname() string {
@@ -879,7 +1475,7 @@ type RegisterReply struct {
 
 func (x *RegisterReply) Reset() {
 	*x = RegisterReply{}
-	mi := &file_litesentry_proto_msgTypes[11]
+	mi := &file_litesentry_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -891,7 +1487,7 @@ func (x *RegisterReply) String() string {
 func (*RegisterReply) ProtoMessage() {}
 
 func (x *RegisterReply) ProtoReflect() protoreflect.Message {
-	mi := &file_litesentry_proto_msgTypes[11]
+	mi := &file_litesentry_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -904,7 +1500,7 @@ func (x *RegisterReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterReply.ProtoReflect.Descriptor instead.
 func (*RegisterReply) Descriptor() ([]byte, []int) {
-	return file_litesentry_proto_rawDescGZIP(), []int{11}
+	return file_litesentry_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *RegisterReply) GetAgentId() string {
@@ -983,7 +1579,55 @@ const file_litesentry_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a9\n" +
 	"\vFieldsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x01R\x05value:\x028\x01\"\xd0\x01\n" +
+	"\x05value\x18\x02 \x01(\x01R\x05value:\x028\x01\"`\n" +
+	"\n" +
+	"PluginSpec\x12\x1b\n" +
+	"\tplugin_id\x18\x01 \x01(\tR\bpluginId\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1b\n" +
+	"\targs_json\x18\x03 \x01(\tR\bargsJson\"\x8e\x01\n" +
+	"\bTaskSpec\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x12\n" +
+	"\x04cron\x18\x02 \x01(\tR\x04cron\x12\x1b\n" +
+	"\tplugin_id\x18\x03 \x01(\tR\bpluginId\x12\x1b\n" +
+	"\targs_json\x18\x04 \x01(\tR\bargsJson\x12\x1b\n" +
+	"\ttimeout_s\x18\x05 \x01(\rR\btimeoutS\"\xcd\x01\n" +
+	"\fDesiredState\x12#\n" +
+	"\rstate_version\x18\x01 \x01(\x04R\fstateVersion\x12\x19\n" +
+	"\bfrp_toml\x18\x02 \x01(\tR\afrpToml\x12\x1f\n" +
+	"\vfrp_enabled\x18\x03 \x01(\bR\n" +
+	"frpEnabled\x120\n" +
+	"\aplugins\x18\x04 \x03(\v2\x16.litesentry.PluginSpecR\aplugins\x12*\n" +
+	"\x05tasks\x18\x05 \x03(\v2\x14.litesentry.TaskSpecR\x05tasks\"F\n" +
+	"\rPluginRequest\x12\x1b\n" +
+	"\tplugin_id\x18\x01 \x01(\tR\bpluginId\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\"]\n" +
+	"\x05Chunk\x12\x12\n" +
+	"\x04data\x18\x01 \x01(\fR\x04data\x12\x16\n" +
+	"\x06sha256\x18\x02 \x01(\tR\x06sha256\x12\x12\n" +
+	"\x04size\x18\x03 \x01(\x04R\x04size\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"\x99\x01\n" +
+	"\x0fFrpTunnelStatus\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\x12\x10\n" +
+	"\x03err\x18\x04 \x01(\tR\x03err\x12\x19\n" +
+	"\brx_bytes\x18\x05 \x01(\x04R\arxBytes\x12\x19\n" +
+	"\btx_bytes\x18\x06 \x01(\x04R\atxBytes\"\x93\x01\n" +
+	"\tFrpStatus\x12\x18\n" +
+	"\arunning\x18\x01 \x01(\bR\arunning\x12\x1f\n" +
+	"\vfrp_version\x18\x02 \x01(\tR\n" +
+	"frpVersion\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\x125\n" +
+	"\atunnels\x18\x04 \x03(\v2\x1b.litesentry.FrpTunnelStatusR\atunnels\"\xb5\x01\n" +
+	"\rTaskRunReport\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1d\n" +
+	"\n" +
+	"started_at\x18\x02 \x01(\x04R\tstartedAt\x12\x1f\n" +
+	"\vfinished_at\x18\x03 \x01(\x04R\n" +
+	"finishedAt\x12\x16\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\x12\x1b\n" +
+	"\texit_code\x18\x05 \x01(\x05R\bexitCode\x12\x16\n" +
+	"\x06output\x18\x06 \x01(\tR\x06output\"\xb1\x02\n" +
 	"\fMetricsBatch\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x0e\n" +
 	"\x02ts\x18\x02 \x01(\x04R\x02ts\x12+\n" +
@@ -991,11 +1635,14 @@ const file_litesentry_proto_rawDesc = "" +
 	"\n" +
 	"containers\x18\x04 \x03(\v2\x1c.litesentry.ContainerMetricsR\n" +
 	"containers\x12*\n" +
-	"\x06series\x18\x05 \x03(\v2\x12.litesentry.SeriesR\x06series\"D\n" +
+	"\x06series\x18\x05 \x03(\v2\x12.litesentry.SeriesR\x06series\x12'\n" +
+	"\x03frp\x18\x06 \x01(\v2\x15.litesentry.FrpStatusR\x03frp\x126\n" +
+	"\ttask_runs\x18\a \x03(\v2\x19.litesentry.TaskRunReportR\btaskRuns\"\x83\x01\n" +
 	"\aPushAck\x12\x1f\n" +
 	"\vserver_time\x18\x01 \x01(\tR\n" +
 	"serverTime\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xa2\x01\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12=\n" +
+	"\rdesired_state\x18\x03 \x01(\v2\x18.litesentry.DesiredStateR\fdesiredState\"\xa2\x01\n" +
 	"\x0fRegisterRequest\x12\x1a\n" +
 	"\bhostname\x18\x01 \x01(\tR\bhostname\x12\x1d\n" +
 	"\n" +
@@ -1007,10 +1654,11 @@ const file_litesentry_proto_rawDesc = "" +
 	"\rRegisterReply\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1f\n" +
 	"\vserver_time\x18\x02 \x01(\tR\n" +
-	"serverTime2\xbf\x01\n" +
+	"serverTime2\xfe\x01\n" +
 	"\x05Agent\x12B\n" +
 	"\bRegister\x12\x1b.litesentry.RegisterRequest\x1a\x19.litesentry.RegisterReply\x125\n" +
-	"\x04Push\x12\x18.litesentry.MetricsBatch\x1a\x13.litesentry.PushAck\x12;\n" +
+	"\x04Push\x12\x18.litesentry.MetricsBatch\x1a\x13.litesentry.PushAck\x12=\n" +
+	"\vFetchPlugin\x12\x19.litesentry.PluginRequest\x1a\x11.litesentry.Chunk0\x01\x12;\n" +
 	"\x06Stream\x12\x18.litesentry.MetricsBatch\x1a\x13.litesentry.PushAck(\x010\x01B$Z\"litesentry/server/gen;litesentrypbb\x06proto3"
 
 var (
@@ -1025,7 +1673,7 @@ func file_litesentry_proto_rawDescGZIP() []byte {
 	return file_litesentry_proto_rawDescData
 }
 
-var file_litesentry_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_litesentry_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_litesentry_proto_goTypes = []any{
 	(*IPAddr)(nil),           // 0: litesentry.IPAddr
 	(*Mem)(nil),              // 1: litesentry.Mem
@@ -1035,12 +1683,20 @@ var file_litesentry_proto_goTypes = []any{
 	(*ContainerMem)(nil),     // 5: litesentry.ContainerMem
 	(*ContainerMetrics)(nil), // 6: litesentry.ContainerMetrics
 	(*Series)(nil),           // 7: litesentry.Series
-	(*MetricsBatch)(nil),     // 8: litesentry.MetricsBatch
-	(*PushAck)(nil),          // 9: litesentry.PushAck
-	(*RegisterRequest)(nil),  // 10: litesentry.RegisterRequest
-	(*RegisterReply)(nil),    // 11: litesentry.RegisterReply
-	nil,                      // 12: litesentry.Series.TagsEntry
-	nil,                      // 13: litesentry.Series.FieldsEntry
+	(*PluginSpec)(nil),       // 8: litesentry.PluginSpec
+	(*TaskSpec)(nil),         // 9: litesentry.TaskSpec
+	(*DesiredState)(nil),     // 10: litesentry.DesiredState
+	(*PluginRequest)(nil),    // 11: litesentry.PluginRequest
+	(*Chunk)(nil),            // 12: litesentry.Chunk
+	(*FrpTunnelStatus)(nil),  // 13: litesentry.FrpTunnelStatus
+	(*FrpStatus)(nil),        // 14: litesentry.FrpStatus
+	(*TaskRunReport)(nil),    // 15: litesentry.TaskRunReport
+	(*MetricsBatch)(nil),     // 16: litesentry.MetricsBatch
+	(*PushAck)(nil),          // 17: litesentry.PushAck
+	(*RegisterRequest)(nil),  // 18: litesentry.RegisterRequest
+	(*RegisterReply)(nil),    // 19: litesentry.RegisterReply
+	nil,                      // 20: litesentry.Series.TagsEntry
+	nil,                      // 21: litesentry.Series.FieldsEntry
 }
 var file_litesentry_proto_depIdxs = []int32{
 	1,  // 0: litesentry.HostMetrics.mem:type_name -> litesentry.Mem
@@ -1050,22 +1706,30 @@ var file_litesentry_proto_depIdxs = []int32{
 	0,  // 4: litesentry.HostMetrics.ips:type_name -> litesentry.IPAddr
 	5,  // 5: litesentry.ContainerMetrics.mem:type_name -> litesentry.ContainerMem
 	3,  // 6: litesentry.ContainerMetrics.net:type_name -> litesentry.Net
-	12, // 7: litesentry.Series.tags:type_name -> litesentry.Series.TagsEntry
-	13, // 8: litesentry.Series.fields:type_name -> litesentry.Series.FieldsEntry
-	4,  // 9: litesentry.MetricsBatch.host:type_name -> litesentry.HostMetrics
-	6,  // 10: litesentry.MetricsBatch.containers:type_name -> litesentry.ContainerMetrics
-	7,  // 11: litesentry.MetricsBatch.series:type_name -> litesentry.Series
-	10, // 12: litesentry.Agent.Register:input_type -> litesentry.RegisterRequest
-	8,  // 13: litesentry.Agent.Push:input_type -> litesentry.MetricsBatch
-	8,  // 14: litesentry.Agent.Stream:input_type -> litesentry.MetricsBatch
-	11, // 15: litesentry.Agent.Register:output_type -> litesentry.RegisterReply
-	9,  // 16: litesentry.Agent.Push:output_type -> litesentry.PushAck
-	9,  // 17: litesentry.Agent.Stream:output_type -> litesentry.PushAck
-	15, // [15:18] is the sub-list for method output_type
-	12, // [12:15] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	20, // 7: litesentry.Series.tags:type_name -> litesentry.Series.TagsEntry
+	21, // 8: litesentry.Series.fields:type_name -> litesentry.Series.FieldsEntry
+	8,  // 9: litesentry.DesiredState.plugins:type_name -> litesentry.PluginSpec
+	9,  // 10: litesentry.DesiredState.tasks:type_name -> litesentry.TaskSpec
+	13, // 11: litesentry.FrpStatus.tunnels:type_name -> litesentry.FrpTunnelStatus
+	4,  // 12: litesentry.MetricsBatch.host:type_name -> litesentry.HostMetrics
+	6,  // 13: litesentry.MetricsBatch.containers:type_name -> litesentry.ContainerMetrics
+	7,  // 14: litesentry.MetricsBatch.series:type_name -> litesentry.Series
+	14, // 15: litesentry.MetricsBatch.frp:type_name -> litesentry.FrpStatus
+	15, // 16: litesentry.MetricsBatch.task_runs:type_name -> litesentry.TaskRunReport
+	10, // 17: litesentry.PushAck.desired_state:type_name -> litesentry.DesiredState
+	18, // 18: litesentry.Agent.Register:input_type -> litesentry.RegisterRequest
+	16, // 19: litesentry.Agent.Push:input_type -> litesentry.MetricsBatch
+	11, // 20: litesentry.Agent.FetchPlugin:input_type -> litesentry.PluginRequest
+	16, // 21: litesentry.Agent.Stream:input_type -> litesentry.MetricsBatch
+	19, // 22: litesentry.Agent.Register:output_type -> litesentry.RegisterReply
+	17, // 23: litesentry.Agent.Push:output_type -> litesentry.PushAck
+	12, // 24: litesentry.Agent.FetchPlugin:output_type -> litesentry.Chunk
+	17, // 25: litesentry.Agent.Stream:output_type -> litesentry.PushAck
+	22, // [22:26] is the sub-list for method output_type
+	18, // [18:22] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_litesentry_proto_init() }
@@ -1079,7 +1743,7 @@ func file_litesentry_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_litesentry_proto_rawDesc), len(file_litesentry_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -1,0 +1,12 @@
+[package]
+name = "litesentry-hello-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "litesentry 示例插件（S1 端到端验证）：长驻 start 模式，按 interval 输出 hello.tick series"
+
+[[bin]]
+name = "hello"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"

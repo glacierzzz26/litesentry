@@ -142,6 +142,108 @@ type User struct {
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
+// ---- 阶段二：插件 / 任务 / frp 数据模型 ----
+
+// Series 通用时序数据（插件统一输出，落 series 表；阶段一预留字段正式启用）。
+type Series struct {
+	Name   string             `json:"name"`
+	Tags   map[string]string  `json:"tags,omitempty"`
+	Fields map[string]float64 `json:"fields"`
+	TS     time.Time          `json:"ts"`
+}
+
+// Plugin 插件仓库条目：不可变发布物，只允许新增版本（UNIQUE(id, version)）。
+type Plugin struct {
+	ID         string    `json:"id"`    // 插件标识（稳定跨版本），如 "hello"
+	Name       string    `json:"name"`  // 展示名
+	Kind       string    `json:"kind"`  // 阶段二仅 binary
+	Version    string    `json:"version"`
+	SHA256     string    `json:"sha256"`
+	Size       int64     `json:"size"`
+	ArgsSchema string    `json:"args_schema,omitempty"` // 参数说明（前端表单用）
+	CreatedAt  time.Time `json:"created_at"`
+	Data       []byte    `json:"-"` // 二进制内容，GetPlugin 返回；List 不填充
+}
+
+// AgentPlugin 插件指派：某 agent 应运行的 manifest 条目（DesiredState.plugins 来源）。
+type AgentPlugin struct {
+	AgentID  string `json:"agent_id"`
+	PluginID string `json:"plugin_id"`
+	Version  string `json:"version"`
+	ArgsJSON string `json:"args_json"`
+}
+
+// Task 定时任务定义：执行全在目标 agent 侧（本地 cron → 插件 run）。
+type Task struct {
+	ID             string     `json:"id"`
+	Name           string     `json:"name"`
+	Description    string     `json:"description"`
+	TargetAgentID  string     `json:"target_agent_id"` // 空 = 公网机（server 同机 agent）
+	Cron           string     `json:"cron"`
+	PluginID       string     `json:"plugin_id"`
+	ArgsJSON       string     `json:"args_json"`
+	TimeoutS       uint32     `json:"timeout_s"`
+	Enabled        bool       `json:"enabled"`
+	LastRunAt      *time.Time `json:"last_run_at,omitempty"`
+	LastStatus     string     `json:"last_status"` // ok | failed | timeout | skipped
+	LastOutputTail string     `json:"last_output_tail"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+// TaskRun 定时任务执行历史（审计）：agent 上报结果，append-only。
+type TaskRun struct {
+	ID         string     `json:"id"`
+	TaskID     string     `json:"task_id"`
+	AgentID    string     `json:"agent_id"`
+	Status     string     `json:"status"` // ok | failed | timeout | skipped
+	ExitCode   *int32     `json:"exit_code,omitempty"`
+	Output     string     `json:"output"` // stdout/stderr 截断尾部
+	StartedAt  time.Time  `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+}
+
+// FrpTunnel 隧道配置项（frpc proxies 元素）。
+type FrpTunnel struct {
+	Name       string `json:"name"`
+	Type       string `json:"type"` // tcp | udp | http | https | stcp ...
+	LocalIP    string `json:"local_ip,omitempty"`
+	LocalPort  int    `json:"local_port,omitempty"`
+	RemotePort int    `json:"remote_port,omitempty"`
+}
+
+// FrpConfig 本机 frp 配置（frps 或某 agent 的 frpc，按 kind+agent 区分）。
+type FrpConfig struct {
+	Kind         string      `json:"kind"` // frps | frpc
+	AgentID      string      `json:"agent_id"`
+	ServerAddr   string      `json:"server_addr"`
+	ServerPort   int         `json:"server_port"`
+	Token        string      `json:"token"` // 仅 gRPC 已鉴权通道下发，绝不过 REST 回传明文
+	Proxies      []FrpTunnel `json:"proxies"`
+	StateVersion uint64      `json:"state_version"`
+	Enabled      bool        `json:"enabled"`
+	UpdatedAt    time.Time   `json:"updated_at"`
+}
+
+// FrpTunnelStatus 隧道实时状态（agent 上报）。
+type FrpTunnelStatus struct {
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Status  string `json:"status"` // online | offline | error
+	Err     string `json:"err,omitempty"`
+	RXBytes uint64 `json:"rx_bytes"`
+	TXBytes uint64 `json:"tx_bytes"`
+}
+
+// FrpStatus 本机 frp 进程 + 隧道整体状态（agent 上报，每次 Push 覆盖写）。
+type FrpStatus struct {
+	Running    bool              `json:"running"`
+	FrpVersion string            `json:"frp_version"`
+	Error      string            `json:"error"`
+	Tunnels    []FrpTunnelStatus `json:"tunnels"`
+	TS         time.Time         `json:"ts"`
+}
+
 // Store 统一存储接口。
 type Store interface {
 	// RegisterAgent 按机器指纹注册：已注册过则复用其 agent_id，否则新建 UUID。
@@ -194,6 +296,41 @@ type Store interface {
 	ResolveEvent(ctx context.Context, id string, at time.Time) error
 	// SetEventNotified 回写通知时间（通知成功/重发时调用）。
 	SetEventNotified(ctx context.Context, id string, at time.Time) error
+
+	// ---- 插件仓库（阶段二）----
+	// SavePlugin 登记一个不可变插件版本（同 id+version 已存在则报错）。
+	SavePlugin(ctx context.Context, p *Plugin) error
+	// ListPlugins 返回全部插件（不含二进制内容，Data 为空）。GetPlugin 返回元信息 + 二进制。
+	ListPlugins(ctx context.Context) ([]*Plugin, error)
+	GetPlugin(ctx context.Context, id, version string) (*Plugin, error)
+
+	// ---- 插件指派（manifest 来源）----
+	// AssignPlugin 指派插件到某 agent（覆盖同插件旧指派）。AgentPlugins 列出该 agent 的 manifest。
+	AssignPlugin(ctx context.Context, ap *AgentPlugin) error
+	AgentPlugins(ctx context.Context, agentID string) ([]*AgentPlugin, error)
+
+	// ---- 插件 Series（阶段二）----
+	// AppendSeries 将一批插件产出的通用时序写入 series 表（单事务）。
+	AppendSeries(ctx context.Context, agentID string, items []*Series) error
+
+	// ---- 定时任务（阶段二，执行在 agent 侧）----
+	SaveTask(ctx context.Context, t *Task) error
+	ListTasks(ctx context.Context) ([]*Task, error)
+	GetTask(ctx context.Context, id string) (*Task, error)
+	DeleteTask(ctx context.Context, id string) error
+	// AppendTaskRun 记录一次执行历史（审计）。QueryTaskRuns 查最近 limit 条。
+	AppendTaskRun(ctx context.Context, r *TaskRun) error
+	QueryTaskRuns(ctx context.Context, taskID string, limit int) ([]*TaskRun, error)
+	// UpdateTaskLastRun 回写任务最近一次执行的摘要（面板列表用，避免 join）。
+	UpdateTaskLastRun(ctx context.Context, taskID, status, outputTail string, at time.Time) error
+
+	// ---- frp 配置 / 状态（阶段二）----
+	SaveFrpConfig(ctx context.Context, c *FrpConfig) error
+	GetFrpConfig(ctx context.Context, kind, agentID string) (*FrpConfig, error)
+	ListFrpConfigs(ctx context.Context) ([]*FrpConfig, error)
+	// UpsertFrpStatus 覆盖写某 agent 最近一次 frp 状态。QueryFrpStatus 读最近一次。
+	UpsertFrpStatus(ctx context.Context, agentID string, s *FrpStatus) error
+	QueryFrpStatus(ctx context.Context, agentID string) (*FrpStatus, error)
 
 	// Cleanup 删除超过保留期（默认 30 天）的时序数据，返回清理行数。
 	Cleanup(ctx context.Context, retention time.Duration) (int64, error)
