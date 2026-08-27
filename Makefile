@@ -5,6 +5,7 @@
 
 BIN_DIR := bin
 PROTO   := proto/litesentry.proto
+VERSION ?= 0.1.0
 
 .PHONY: all deps proto proto-doc docs web server agent build test run-server run-agent docker clean
 
@@ -67,12 +68,12 @@ run-agent:
 test:
 	cd server && go test ./...
 
-## 打包 Docker 镜像：本地构建 server 二进制（内嵌前端）→ 基于 nginx 的基础镜像只做 COPY
-## CGO_ENABLED=0：静态链接，保证能跑在 nginx:alpine（musl）
-docker: web
-	mkdir -p $(BIN_DIR)
-	cd server && CGO_ENABLED=0 go build -o ../$(BIN_DIR)/litesentry-server ./cmd/server
-	docker build -f deploy/Dockerfile -t litesentry:latest .
+## 打包 Docker 镜像：自包含多阶段构建（deploy/Dockerfile 内完成前端+server 编译），
+## 无需宿主机 go/node 工具链；打版本双 tag（默认 0.1.0 + latest）。
+## 国内网络可先 `export GOPROXY=https://goproxy.cn,direct` 再 make docker（透传给构建期 go）
+docker:
+	docker build -f deploy/Dockerfile -t litesentry:$(VERSION) -t litesentry:latest \
+		$(if $(GOPROXY),--build-arg GOPROXY=$(GOPROXY),) .
 
 clean:
 	rm -rf $(BIN_DIR) agent/target server/docs server/internal/webui/dist

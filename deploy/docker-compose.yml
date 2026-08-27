@@ -1,7 +1,7 @@
 # litesentry 生产部署：单镜像 = nginx(HTTPS) + server(web/API + gRPC mTLS)。
 #
 # 使用：
-#   1. make docker                                       # 本地构建产物 + nginx 基础镜像打包
+#   1. make docker                                       # 自包含多阶段构建 → litesentry:0.1.0 + latest
 #   2. ./deploy/gen-certs.sh ./certs 'DNS:你的主机名,IP:你的IP'   # 生成证书
 #   3. 复制 .env.example 为 .env 并填好 LITESENTRY_TOKEN / LITESENTRY_JWT_SECRET / LITESENTRY_BOOTSTRAP_PASS
 #   4. docker compose up -d --build
@@ -12,7 +12,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    image: litesentry:latest
+    image: litesentry:0.1.0
     container_name: litesentry
     restart: unless-stopped
     ports:

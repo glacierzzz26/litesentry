@@ -1,13 +1,12 @@
-# 构建上下文排除：避免大目录与敏感文件进入镜像
-# 注意：bin/ 需保留在上下文中（deploy/Dockerfile 要 COPY bin/litesentry-server 打包）
+# Docker 构建上下文裁剪：只进 server 镜像需要的东西。
+# 注意：server/docs/（swag 产物，main.go import）必须保留，不能忽略。
+
 .git
-.dev
-certs
-deploy/certs
-agent/target
-server/internal/webui/dist
-node_modules
-web/node_modules
+bin/
+agent/
+certs/
+deploy/.env
+web/node_modules/
+web/dist/
+server/internal/webui/dist/
 *.log
-.env
-**/__pycache__
