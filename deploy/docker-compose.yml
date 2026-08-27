@@ -16,8 +16,9 @@ services:
     container_name: litesentry
     restart: unless-stopped
     ports:
-      - "443:443"
-      - "9000:9000"
+      # 默认 443/9000；共享服务器/安全组受限时用 .env 覆盖（如 LS_HTTPS_PORT=17002 LS_GRPC_PORT=17003）
+      - "${LS_HTTPS_PORT:-443}:443"
+      - "${LS_GRPC_PORT:-9000}:9000"
     volumes:
       # 证书只在运行时挂载，不进镜像；路径相对本文件（deploy/../certs = 仓库根/certs）
       - ../certs:/etc/litesentry/certs:ro
