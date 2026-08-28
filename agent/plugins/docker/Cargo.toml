@@ -1,0 +1,20 @@
+[package]
+name = "litesentry-docker-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "litesentry 内置插件：容器指标采集（bollard / Docker Engine API）"
+
+[[bin]]
+name = "docker"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "io-std", "io-util"] }
+bollard = "0.17"
+futures-util = "0.3"
+serde_json = "1"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

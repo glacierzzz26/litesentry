@@ -410,6 +410,25 @@ rpc FetchPlugin(PluginRequest) returns (stream Chunk);   // 流式分块 + sha25
 - 采集逻辑编译为**内置插件**（随 agent 发布，manifest 内置），`interval` 驱动长驻；产出 `host.*` / `container.*` / `disk.*` Series
 - Server 把插件 Series **翻译回现有 `host_metrics/container_metrics/disk_metrics` 表**，前端与告警引擎零改动仍可工作
 
+### 采集迁移已落地（S1 插件地基 + S2 采集迁移）
+
+**决策落地**：
+
+- **D1 内置插件旁路发布**：3 个独立插件 crate（`agent/plugins/{host,docker,disk}`，release strip+lto），随 agent 放在 `<agent_exe>/plugins/`（`LS_BUILTIN_DIR` 覆盖）；**不内嵌** —— 内嵌会使 agent 涨到 ~10MB+ 突破单二进制 ≤10MB 硬约束（当前 agent 3.9MB，插件 host 660KB / docker 1.9MB / disk 438KB）
+- **D2 内置插件 always-on**：Agent 启动即拉起 host/docker/disk，不走 DesiredState（避免 Server 内置清单与 Agent 插件版本耦合 footgun）；外部插件（hello/自定义）白名单 + FetchPlugin 校验模型不变。内置插件信任继承自 agent 本体，运行时对 `<agent_exe>/plugins/` 下文件做 SHA-256 复核（build.rs 在构建期把插件二进制哈希 + 版本写入 agent 内置清单）
+- **D3 Series 契约**（Server 翻译层 `server/internal/grpc/translate.go` 纯函数，改动需与插件同步）：
+
+| series | tags | fields | 翻译目标 |
+|---|---|---|---|
+| `host.info`（每 tick 1 条） | hostname, os, arch, kernel | uptime_s, load_1m, load_5m, cpu_pct, mem_total, mem_used, swap_total, swap_used, net_rx_bps, net_tx_bps, agent_cpu_pct, agent_mem_rss | `host_metrics` + agents 快照 |
+| `host.ip`（每地址 1 条） | addr, family, iface, scope | — | agents 快照 IPv4/IPv6 |
+| `disk.usage`（每挂载点 1 条） | mount, fs | total, used | `disk_metrics` |
+| `container.info`（每容器 1 条） | container_id, name, image, state | restarts, uptime_s, cpu_pct, mem_usage, mem_limit, net_rx_bps, net_tx_bps | `container_metrics` |
+
+  其余 series（外部插件，如 hello.tick）保持通用，仅落 `series` 表。翻译后 series 仍全部落 `series` 表（统一入口，符合「S2 再按前缀翻译回」设计）。
+- **D4 agent_cpu/agent_mem 语义保持**：host 插件读 `/proc/<getppid()>/stat` + `/proc/<getppid()>/statm`（ppid = agent，插件由 agent 直接 spawn），口径与阶段一「Agent 自身进程占用」一致
+- **向后兼容**：`persist()` 保留旧 `host`/`containers` proto 路径（旧 agent 不受影响）；翻译结果与 proto 实体合并走同一 `UpsertAgent`/`AppendBatch` 事务。端到端已验：新 agent 的 host.info/host.ip/disk.usage/container.info 全部翻译回现有表，面板 `/api/overview`、`/api/agents`、容器页数据与迁移前一致；smoke 旧格式 batch 仍落 host/container/disk 表
+
 ## Server 数据模型（store 包新增表）
 
 `plugins`（id, name, kind, version, sha256, size, args_schema, created_at, UNIQUE(id,version)）·
@@ -431,7 +450,7 @@ rpc FetchPlugin(PluginRequest) returns (stream Chunk);   // 流式分块 + sha25
 ## 实现路线（S0–S4，每步独立验收，可停顿续接）
 
 1. **S0 设计定稿**：本文档更新（已完成）
-2. **S1 地基**：proto 扩展 + Agent 插件宿主（下载/校验/子进程/JSON-line）+ Server 插件仓库 / DesiredState / Series 落库 → hello 插件端到端
-3. **S2 采集迁移**：host/docker/disk 迁移为内置插件，server 翻译回现有表 → 面板数据与迁移前一致
+2. **S1 地基**：proto 扩展 + Agent 插件宿主（下载/校验/子进程/JSON-line）+ Server 插件仓库 / DesiredState / Series 落库 → hello 插件端到端（已完成，见「采集迁移已落地」）
+3. **S2 采集迁移**：host/docker/disk 迁移为内置插件，server 翻译回现有表 → 面板数据与迁移前一致（已完成，见「采集迁移已落地」）
 4. **S3 FRP**：agent frp 管理器 + server frp 配置存储/下发 + 前端 FRP 页
 5. **S4 定时任务**：任务模型 + agent 本地 cron + 结果回传 + 前端定时任务页

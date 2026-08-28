@@ -313,6 +313,21 @@ func (s *Server) persist(ctx context.Context, batch *litesentrypb.MetricsBatch) 
 		})
 	}
 
+	// S2：内置插件 Series → 翻译回现有表（host.info / host.ip / disk.usage / container.info）。
+	// 新 agent 只带 series（host 留空）、旧 agent 只带 proto 字段 —— 二者天然互斥；
+	// 翻译结果并入上面的实体集合，UpsertAgent/AppendBatch 保持单一路径。
+	if n := len(batch.GetSeries()); n > 0 {
+		ths, tdisks, tconts, tagent := translateSeries(batch.GetAgentId(), ts, batch.GetSeries())
+		if hs == nil {
+			hs = ths
+		}
+		disks = append(disks, tdisks...)
+		containers = append(containers, tconts...)
+		if agent == nil {
+			agent = tagent
+		}
+	}
+
 	if agent != nil {
 		if err := s.store.UpsertAgent(ctx, agent); err != nil {
 			return err

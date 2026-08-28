@@ -38,8 +38,14 @@ web:
 	mkdir -p server/internal/webui/dist
 	cp -r web/dist/* server/internal/webui/dist/
 
-## 编译 Rust Agent（静态二进制）
-agent:
+## 编译内置采集插件（host/docker/disk，agent build.rs 生成内置清单依赖它们）
+agent-plugins:
+	cd agent/plugins/host && cargo build --release
+	cd agent/plugins/docker && cargo build --release
+	cd agent/plugins/disk && cargo build --release
+
+## 编译 Rust Agent（静态二进制；先构建内置插件，随本体旁路发布）
+agent: agent-plugins
 	cd agent && cargo build --release
 
 ## 编译 Go Server（先保证前端与 OpenAPI 就位）

@@ -1,0 +1,20 @@
+[package]
+name = "litesentry-host-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "litesentry 内置插件：主机指标采集（sysinfo + get_if_addrs）"
+
+[[bin]]
+name = "host"
+path = "src/main.rs"
+
+[dependencies]
+sysinfo = "0.33"
+get_if_addrs = "0.5"
+libc = "0.2"
+serde_json = "1"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

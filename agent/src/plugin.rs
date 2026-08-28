@@ -7,7 +7,7 @@
 //! 白名单模型：只运行 Server 指派清单（DesiredState.plugins）内的 plugin_id:version；
 //! 二进制缓存按 plugin_id/version 存放，下载时对末尾分块 SHA-256 校验，缓存复用再次校验。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
@@ -34,6 +34,7 @@ struct Proc {
 pub struct PluginHost {
     cache_dir: PathBuf,
     procs: HashMap<String, Proc>, // plugin_id → 进程
+    builtin_ids: HashSet<String>, // 内置插件（always-on）：apply() 不启停
     tx: mpsc::Sender<Series>,
     rx: mpsc::Receiver<Series>,
     interval: u64, // 上报间隔（秒），作为插件 interval 缺省
@@ -45,6 +46,7 @@ impl PluginHost {
         Self {
             cache_dir: PathBuf::from(cache_dir),
             procs: HashMap::new(),
+            builtin_ids: crate::builtin::BUILTIN_PLUGINS.iter().map(|e| e.id.to_string()).collect(),
             tx,
             rx,
             interval,
@@ -63,9 +65,12 @@ impl PluginHost {
     /// 应用 DesiredState 的插件清单（幂等）：停止已移除/变更版本，启动缺失。
     /// 单个插件失败不影响其余（失败隔离，插件问题不拖垮心跳）。
     pub async fn apply(&mut self, client: &mut crate::client::Client, token: &str, desired: &[PluginSpec]) -> Result<()> {
-        // 1. 停止：不再指派，或版本变更
+        // 1. 停止：不再指派，或版本变更（内置插件 always-on，跳过）
         let current: Vec<String> = self.procs.keys().cloned().collect();
         for id in current {
+            if self.builtin_ids.contains(&id) {
+                continue;
+            }
             let spec = desired.iter().find(|p| p.plugin_id == id);
             match spec {
                 None => self.stop(&id).await,
@@ -86,6 +91,25 @@ impl PluginHost {
             }
         }
         Ok(())
+    }
+
+    /// 启动全部内置插件（阶段二 D2：always-on，不随 DesiredState 启停）。
+    /// 单插件失败（清单缺失 / SHA-256 不匹配 / spawn 失败）仅告警，不影响其余。
+    pub async fn start_builtins(&mut self, client: &mut crate::client::Client, token: &str) {
+        for entry in crate::builtin::BUILTIN_PLUGINS {
+            if self.procs.contains_key(entry.id) {
+                continue;
+            }
+            let spec = PluginSpec {
+                plugin_id: entry.id.to_string(),
+                version: entry.version.to_string(),
+                args_json: String::new(),
+            };
+            match self.start(client, token, &spec).await {
+                Ok(()) => info!("内置插件 {}@{} 已启动", spec.plugin_id, spec.version),
+                Err(e) => warn!("内置插件 {}@{} 启动失败: {e}", spec.plugin_id, spec.version),
+            }
+        }
     }
 
     /// 启动一个长驻插件：确保二进制 → spawn → 写 start 命令 → 后台读 stdout/stderr。
@@ -179,9 +203,18 @@ impl PluginHost {
         }
     }
 
-    /// 确保插件二进制在缓存目录且校验和一致；缺/旧则 FetchPlugin 下载。
-    /// 缓存目录按 plugin_id/version 存放，二进制 + 同名校验和 sidecar。
+    /// 确保插件二进制可用。内置插件（清单命中且版本一致）→ 本地 SHA-256 复核，不走网络；
+    /// 外部插件 → 缓存目录（按 plugin_id/version）校验，缺/旧则 FetchPlugin 下载。
     async fn ensure_binary(&self, client: &mut crate::client::Client, token: &str, spec: &PluginSpec) -> Result<PathBuf> {
+        if let Some(entry) = crate::builtin::find(&spec.plugin_id) {
+            if entry.version == spec.version {
+                return crate::builtin::verify(entry).map_err(|e| anyhow!(e));
+            }
+            warn!(
+                "内置插件 {} 清单版本 {} ≠ 期望 {} —— 走 FetchPlugin 下载",
+                spec.plugin_id, entry.version, spec.version
+            );
+        }
         let dir = self.cache_dir.join(&spec.plugin_id).join(&spec.version);
         let bin = dir.join("plugin");
         let sidecar = dir.join("plugin.sha256");

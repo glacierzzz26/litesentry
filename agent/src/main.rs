@@ -1,14 +1,11 @@
 //! litesentry-agent：轻量监控采集端（Rust）。
 //!
-//! 阶段一职责：定时采集主机 + 容器指标，经 gRPC 推送到 Server。
-//! core（传输核）/ collector 分层：阶段二 collector 将降级为 Server 下发的内置插件，
-//! core 保持不变。
+//! 阶段二 S2：主机/容器/磁盘采集已迁入内置插件（host/docker/disk，随 agent 旁路发布）。
+//! Agent 核心只保留传输核（gRPC push）+ 插件宿主 + 注册；core 分层保持传输核不变。
 
+mod builtin;
 mod client;
-mod collector;
 mod config;
-mod docker;
-mod ip;
 mod plugin;
 
 pub mod pb {
@@ -21,9 +18,17 @@ use anyhow::Result;
 use tokio::time;
 
 use crate::client::RegisterInfo;
-use crate::collector::HostSample;
 use crate::config::{cache_agent_id, machine_id, Config, TlsConfig};
-use crate::pb::{ContainerMetrics, HostMetrics as PbHost, MetricsBatch};
+use crate::pb::MetricsBatch;
+
+/// 注册元数据：轻量静态读取（不再实例化完整 Collector）。
+fn register_meta() -> (String, String, String, String) {
+    let hostname = sysinfo::System::host_name().unwrap_or_else(|| "unknown".to_string());
+    let os = sysinfo::System::long_os_version().unwrap_or_else(|| "unknown".to_string());
+    let kernel = sysinfo::System::kernel_version().unwrap_or_else(|| "unknown".to_string());
+    let arch = std::env::consts::ARCH.to_string();
+    (hostname, os, arch, kernel)
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -39,9 +44,6 @@ async fn main() -> Result<()> {
         tracing::warn!("LS_TOKEN 未设置（Server 未配置 token 时才可联调）");
     }
 
-    let mut collector = collector::Collector::new();
-    let dcollector = docker::DockerCollector::new();
-
     // 首次连接失败直接退出，由 systemd/容器编排负责重启（Keep simple）
     let tls: TlsConfig = cfg.tls();
     let mut client = client::Client::connect(&cfg.server, &tls).await?;
@@ -54,13 +56,13 @@ async fn main() -> Result<()> {
     // agent_id：LS_AGENT_ID 显式指定则直接用；否则用自身机器信息向 Server 注册
     // （Server 按机器指纹复用历史 id，重装/重启也不变）
     let agent_id = if cfg.agent_id.is_empty() {
-        let meta = collector.collect(); // 顺带预热 CPU/网络差分基线
+        let (hostname, os, arch, kernel) = register_meta();
         let info = RegisterInfo {
-            hostname: meta.hostname.clone(),
+            hostname,
             machine_id: machine_id(),
-            os: meta.os.clone(),
-            arch: meta.arch.clone(),
-            kernel: meta.kernel.clone(),
+            os,
+            arch,
+            kernel,
             version: env!("CARGO_PKG_VERSION").to_string(),
         };
         let id = client.register(&cfg.token, &info).await?;
@@ -72,23 +74,17 @@ async fn main() -> Result<()> {
     tracing::info!("agent {agent_id} → {} (interval {}s, 心跳=上报)", cfg.server, cfg.interval_secs);
 
     let mut host = plugin::PluginHost::new(&cfg.plugin_dir, cfg.interval_secs);
+    // S2：拉起内置采集插件（host/docker/disk），always-on
+    host.start_builtins(&mut client, &cfg.token).await;
+
     let mut applied_version: u64 = 0; // 已应用的 DesiredState 版本（心跳下发，等于即跳过）
 
     let mut ticker = time::interval(Duration::from_secs(cfg.interval_secs));
     loop {
         ticker.tick().await;
 
-        let host_sample = collector.collect();
-        let containers = match dcollector.collect().await {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::warn!("容器采集失败: {e}");
-                Vec::new()
-            }
-        };
-
-        // 汇入插件系列（阶段二）
-        let mut batch = build_batch(&agent_id, &host_sample, &containers);
+        // S2：主机/容器/磁盘数据全部来自内置插件 series；host/containers 字段留空
+        let mut batch = build_batch(&agent_id);
         batch.series = host.drain_series();
 
         match client.push(&cfg.token, batch).await {
@@ -111,73 +107,15 @@ async fn main() -> Result<()> {
     }
 }
 
-fn build_batch(
-    agent_id: &str,
-    host: &HostSample,
-    containers: &[docker::ContainerSample],
-) -> MetricsBatch {
-    let ips = host
-        .ips
-        .iter()
-        .map(|a| pb::IpAddr {
-            family: a.family.clone(),
-            addr: a.addr.clone(),
-            iface: a.iface.clone(),
-            scope: a.scope.clone(),
-        })
-        .collect();
-
-    let disks = host
-        .disks
-        .iter()
-        .map(|d| pb::Disk {
-            mount: d.mount.clone(),
-            fs: d.fs.clone(),
-            total: d.total,
-            used: d.used,
-        })
-        .collect();
-
-    let pb_host = PbHost {
-        hostname: host.hostname.clone(),
-        os: host.os.clone(),
-        arch: host.arch.clone(),
-        kernel: host.kernel.clone(),
-        uptime_s: host.uptime_s,
-        load_1m: host.load_1m as f32,
-        load_5m: host.load_5m as f32,
-        cpu_pct: host.cpu_pct as f32,
-        agent_cpu_pct: host.agent_cpu_pct as f32,
-        agent_mem_rss: host.agent_mem_rss,
-        mem: Some(pb::Mem { total: host.mem_total, used: host.mem_used }),
-        swap: Some(pb::Mem { total: host.swap_total, used: host.swap_used }),
-        disks,
-        net: Some(pb::Net { rx_bps: host.net_rx_bps, tx_bps: host.net_tx_bps }),
-        ips,
-    };
-
-    let pb_containers = containers
-        .iter()
-        .map(|c| ContainerMetrics {
-            id: c.id.clone(),
-            name: c.name.clone(),
-            image: c.image.clone(),
-            state: c.state.clone(),
-            restarts: c.restarts,
-            uptime_s: c.uptime_s,
-            cpu_pct: c.cpu_pct as f32,
-            mem: Some(pb::ContainerMem { usage: c.mem_usage, limit: c.mem_limit }),
-            net: Some(pb::Net { rx_bps: c.net_rx_bps, tx_bps: c.net_tx_bps }),
-        })
-        .collect();
-
+/// S2：batch 只带 series（主机/容器/磁盘均由插件产出），host/containers 留空。
+fn build_batch(agent_id: &str) -> MetricsBatch {
     MetricsBatch {
         agent_id: agent_id.to_string(),
         ts: chrono::Utc::now().timestamp() as u64,
-        host: Some(pb_host),
-        containers: pb_containers,
-        series: Vec::new(), // 阶段二：主循环汇入插件系列
-        frp: None,          // 阶段二 S3：frp 状态
-        task_runs: Vec::new(), // 阶段二 S4：定时任务执行结果
+        host: None,             // S2：主机采集迁入内置插件（host.info/host.ip series）
+        containers: Vec::new(), // S2：容器采集迁入内置插件（container.info series）
+        series: Vec::new(),     // 主循环汇入插件系列
+        frp: None,              // 阶段二 S3：frp 状态
+        task_runs: Vec::new(),  // 阶段二 S4：定时任务执行结果
     }
 }
