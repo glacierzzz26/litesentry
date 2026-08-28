@@ -85,6 +85,13 @@ func (s *Server) Routes() *gin.Engine {
 		api.PUT("/frp/:kind/:agent_id", s.saveFrp)
 		api.DELETE("/frp/:kind/:agent_id", s.deleteFrp)
 
+		api.GET("/tasks", s.listTasks)
+		api.POST("/tasks", s.createTask)
+		api.PUT("/tasks/:id", s.updateTask)
+		api.DELETE("/tasks/:id", s.deleteTask)
+		api.GET("/tasks/:id/runs", s.taskRuns)
+		api.GET("/agents/:id/plugins", s.agentPlugins)
+
 		api.GET("/alerts/rules", s.listRules)
 		api.POST("/alerts/rules", s.createRule)
 		api.PUT("/alerts/rules/:id", s.updateRule)

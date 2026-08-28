@@ -12,6 +12,7 @@ import {
   DesktopOutlined,
   LinkOutlined,
   MoonOutlined,
+  ScheduleOutlined,
   SettingOutlined,
   SunOutlined,
   WarningOutlined,
@@ -26,6 +27,7 @@ import ChangePassword from './pages/ChangePassword';
 import Settings from './pages/Settings';
 import AlertRules from './pages/AlertRules';
 import Frp from './pages/Frp';
+import Tasks from './pages/Tasks';
 // v2 新建页面
 import Overview from './pages/Overview';
 import Hosts from './pages/Hosts';
@@ -41,6 +43,7 @@ const MENU = [
   { key: '/alerts', icon: <WarningOutlined />, label: '告警事件' },
   { key: '/alerts/rules', icon: <ControlOutlined />, label: '告警规则' },
   { key: '/frp', icon: <LinkOutlined />, label: 'FRP 隧道' },
+  { key: '/tasks', icon: <ScheduleOutlined />, label: '定时任务' },
   { key: '/settings', icon: <SettingOutlined />, label: '设置' },
 ] as const;
 
@@ -52,6 +55,7 @@ function menuKey(route: string[]): string {
   if (r === 'containers') return '/containers';
   if (r === 'alerts') return route[1] === 'rules' ? '/alerts/rules' : '/alerts';
   if (r === 'frp') return '/frp';
+  if (r === 'tasks') return '/tasks';
   if (r === 'settings') return '/settings';
   return '/';
 }
@@ -64,6 +68,7 @@ function pageTitle(route: string[]): string {
   if (r === 'containers') return '容器';
   if (r === 'alerts') return route[1] === 'rules' ? '告警规则' : '告警事件';
   if (r === 'frp') return 'FRP 隧道';
+  if (r === 'tasks') return '定时任务';
   if (r === 'settings') return '设置';
   return '总览';
 }
@@ -139,6 +144,8 @@ export default function App() {
     page = <Alerts />;
   } else if (route[0] === 'frp') {
     page = <Frp />;
+  } else if (route[0] === 'tasks') {
+    page = <Tasks />;
   } else if (route[0] === 'settings') {
     page = <Settings />;
   } else {

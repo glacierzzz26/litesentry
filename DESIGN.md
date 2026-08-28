@@ -450,6 +450,27 @@ rpc FetchPlugin(PluginRequest) returns (stream Chunk);   // 流式分块 + sha25
 - 回归：S2 的 host/container/disk series 与 FRP 并存不受影响
 - 前端 FRP 页：配置卡片（类型 / 目标主机名 / 启用开关 / 运行状态）+ 隧道状态表 + 新建/编辑/删除；token 仅写入不回显（编辑留空 = 保留原值）；agent_id 永不出现在 UI
 
+### 定时任务已落地（S4 任务模型 + agent 本地 cron + 结果回传）
+
+**决策落地**：
+
+- **D1 任务执行 = 插件一次性 `run`**：cron 到期 → agent 把指派版本插件二进制 spawn 一次（非长驻），stdin 写 `{"cmd":"run","args":...}` → 收 stdout/stderr 尾部 + 退出码 + 耗时 → TaskRunReport 回传落 `task_runs` 审计。**非 shell 命令**（沿用插件白名单信任边界，与「Server 分发可执行代码」安全模型一致）
+- **D2 插件协议扩展 `run` 命令**：与既有 `start`（长驻）并列，插件 stdin 首行按 `cmd` 分派。hello 插件加 `run` 分支作参考实现（含 `sleep`/`msg`/`fail` 测试钩子）。插件作者注意：被指派的任务插件应同时实现 start 与 run，否则会因不支持 start 被宿主反复拉起
+- **D3 任务插件版本 = 目标 agent 指派版本**（S1 信任边界）：TaskSpec 无版本字段（proto 冻结）→ agent 用 `plugin_id` 在 **ds.Plugins（指派 manifest）+ 内置 manifest** 解析版本 → `ensure_binary` 下载/复核 → run；未指派/未内置 → 本次 run 报 `failed`（output=「插件 nope 未指派到本节点」）。前端任务表单插件下拉**只列目标节点已指派插件**（`GET /api/agents/:id/plugins`）+ Server 侧 `pluginAssigned` 校验，双保险
+- **D4 Agent 调度器**（新建 `agent/src/task.rs`）：`apply()` 在 state_version 门内重建任务集（cron 解析 + 算 next_fire）；`fire_due()` 每心跳 push 前触发到期任务——**无论成败都推进 next_fire**（`schedule.after(now).next()`），防失败任务每心跳重报；同任务上一轮未结束 → `skipped`；版本解析失败 → `failed`；成功 → `ensure_binary` → **tokio::spawn 后台 run**（不阻塞心跳）。后台结果经 mpsc 回传，`drain_reports()` 每心跳汇入 `batch.task_runs`
+- **D5 一次性 run**（`run_one_shot`，纯本地不需 client）：spawn → 写 run 命令 + shutdown stdin → 双 read task 并发收 stdout/stderr 进**共享 8KB 尾部环形缓冲**（超限丢头）→ `timeout(timeout_s)`：超时强杀 → `timeout`/exit_code=-1；退出 0 → `ok`；非 0 → `failed`；spawn 失败 → `failed`
+- **D6 cron 依赖 = 纯 Rust `cron` crate（0.12）**。**实测修正**：cron 0.12 要求 **6/7 段（含秒）**，标准 5 段 `* * * * *` 被拒 → agent 侧 `normalize_cron()` 对 5 段表达式前补 `"0 "`（秒=0，语义等价于分钟边界触发）；Server 校验 / 前端 / 文档仍用标准 5 段格式。二进制增量 <1MB（agent 现 4.2MB，≤10MB 硬约束内）
+- **D7 REST 端点**（新建 `server/internal/api/tasks.go`）：`GET/POST /api/tasks`、`PUT/DELETE /api/tasks/:id`、`GET /api/tasks/:id/runs?limit`、`GET /api/agents/:id/plugins`；`validCron()` 轻量结构校验（5 段 / 数值范围 / `,`-`*`-`/N`），严格解析交给 agent cron crate。任务视图 `target_agent_name` = 目标主机名（''→server_agent_id→公网机；未知→「未知节点」），`target_agent_id` 与 FrpConfigView 同策略返回但不展示
+- **D8 前端任务页**（新建 `web/src/pages/Tasks.tsx`）：列表卡片（名称 / cron / 目标主机名 / 插件 / 启用开关 / 最近运行摘要 last_status+output 尾部）+ 运行历史 Drawer + 新建/编辑 Modal（目标节点 Select 含「公网机」哨兵 → 联动插件下拉取指派清单 / args_json / timeout_s）。`tasks` 表已含 enabled + last_run_* → 开关与摘要零额外工作；`task_runs` append-only 审计（保留策略=后续加固项）
+
+**端到端已验**（本地双 agent：a-pub 公网机 + b-intra 内网机，同一物理机用 `LS_AGENT_ID` 区分，`LS_PLUGIN_DIR` 按 agent 分目录避免共享缓存 ETXTBSY 竞态）：
+- 建任务（目标 `''` → 公网机 a-pub / b-intra）→ DesiredState 下发 → agent 每分钟边界触发 hello run → `task_runs` 落库
+- 结果矩阵：`{"msg":"ping"}` → `ok`/exit 0/output 回显；`{"sleep":60}`+timeout 5 → `timeout`（耗时恰 5s，强杀）；引用未指派插件（DB 直插绕过 REST 校验）→ `failed`/output「插件 nope 未指派到本节点」（验证 D3 运行期兜底）
+- `tasks.last_run_at/last_status/last_output_tail` 已回写；`task_runs` 覆盖多轮（含缓存目录不可写期的 `failed` 记录，审计完整）
+- REST 负面：非法 cron / 未指派插件 / timeout 越界 / 空名称 → 400 中文错误
+- 前端任务页 + 运行历史；target_agent_name 显示主机名（DESKTOP-6R75NEG），agent_id 绝不出现在 UI
+- 回归：S2 host/docker/disk 采集与任务调度并存不受影响
+
 ## Server 数据模型（store 包新增表）
 
 `plugins`（id, name, kind, version, sha256, size, args_schema, created_at, UNIQUE(id,version)）·
@@ -474,4 +495,4 @@ rpc FetchPlugin(PluginRequest) returns (stream Chunk);   // 流式分块 + sha25
 2. **S1 地基**：proto 扩展 + Agent 插件宿主（下载/校验/子进程/JSON-line）+ Server 插件仓库 / DesiredState / Series 落库 → hello 插件端到端（已完成，见「采集迁移已落地」）
 3. **S2 采集迁移**：host/docker/disk 迁移为内置插件，server 翻译回现有表 → 面板数据与迁移前一致（已完成，见「采集迁移已落地」）
 4. **S3 FRP**：agent frp 管理器 + server frp 配置存储/下发 + 前端 FRP 页（已完成，见「FRP 已落地」）
-5. **S4 定时任务**：任务模型 + agent 本地 cron + 结果回传 + 前端定时任务页
+5. **S4 定时任务**：任务模型 + agent 本地 cron + 结果回传 + 前端定时任务页（已完成，见「定时任务已落地」）

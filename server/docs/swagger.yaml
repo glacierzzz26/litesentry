@@ -80,11 +80,66 @@ definitions:
       token:
         type: string
     type: object
+  api.saveTaskBody:
+    properties:
+      args_json:
+        type: string
+      cron:
+        type: string
+      description:
+        type: string
+      enabled:
+        type: boolean
+      name:
+        type: string
+      plugin_id:
+        type: string
+      target_agent_id:
+        description: 空 = 公网机
+        type: string
+      timeout_s:
+        type: integer
+    type: object
   api.settingsView:
     properties:
       feishu_secret_set:
         type: boolean
       feishu_webhook:
+        type: string
+    type: object
+  api.taskView:
+    properties:
+      args_json:
+        type: string
+      created_at:
+        type: string
+      cron:
+        type: string
+      description:
+        type: string
+      enabled:
+        type: boolean
+      id:
+        type: string
+      last_output_tail:
+        type: string
+      last_run_at:
+        type: string
+      last_status:
+        description: ok | failed | timeout | skipped
+        type: string
+      name:
+        type: string
+      plugin_id:
+        type: string
+      target_agent_id:
+        description: 空 = 公网机（server 同机 agent）
+        type: string
+      target_agent_name:
+        type: string
+      timeout_s:
+        type: integer
+      updated_at:
         type: string
     type: object
   api.updateUserBody:
@@ -132,6 +187,17 @@ definitions:
         type: string
       version:
         description: Agent 构建版本（注册上报）
+        type: string
+    type: object
+  store.AgentPlugin:
+    properties:
+      agent_id:
+        type: string
+      args_json:
+        type: string
+      plugin_id:
+        type: string
+      version:
         type: string
     type: object
   store.AlertEvent:
@@ -382,6 +448,27 @@ definitions:
       version:
         type: string
     type: object
+  store.TaskRun:
+    properties:
+      agent_id:
+        type: string
+      exit_code:
+        type: integer
+      finished_at:
+        type: string
+      id:
+        type: string
+      output:
+        description: stdout/stderr 截断尾部
+        type: string
+      started_at:
+        type: string
+      status:
+        description: ok | failed | timeout | skipped
+        type: string
+      task_id:
+        type: string
+    type: object
   store.User:
     properties:
       created_at:
@@ -547,6 +634,35 @@ paths:
       summary: 主机指标时序
       tags:
       - 时序
+  /agents/{id}/plugins:
+    get:
+      description: 某 agent（或公网机 server）已指派的插件清单，供定时任务表单选择
+      parameters:
+      - description: agent_id，或 server（公网机）
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/store.AgentPlugin'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Agent 已指派插件
+      tags:
+      - 定时任务
   /alerts/events:
     get:
       description: 按时间窗口查询，可按节点 / 状态过滤；默认最近 24h
@@ -1125,6 +1241,164 @@ paths:
       summary: 测试飞书机器人
       tags:
       - 设置
+  /tasks:
+    get:
+      description: 全部定时任务，含目标节点主机名与最近运行摘要（agent_id 不回传）
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.taskView'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 定时任务列表
+      tags:
+      - 定时任务
+    post:
+      consumes:
+      - application/json
+      description: 新建定时任务：cron 到期后目标 agent 本地触发插件一次性 run（插件必须已指派）
+      parameters:
+      - description: 任务定义
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.saveTaskBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.taskView'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 新建定时任务
+      tags:
+      - 定时任务
+  /tasks/{id}:
+    delete:
+      description: 删除定时任务定义；历史运行记录保留（append-only 审计）
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 删除定时任务
+      tags:
+      - 定时任务
+    put:
+      consumes:
+      - application/json
+      description: 更新定时任务定义（含目标节点/插件/args 变更）
+      parameters:
+      - description: 任务 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 任务定义
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.saveTaskBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.taskView'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 更新定时任务
+      tags:
+      - 定时任务
+  /tasks/{id}/runs:
+    get:
+      description: 某定时任务的执行历史（agent 上报，最近 limit 条，默认 50）
+      parameters:
+      - description: 任务 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 条数上限（默认 50，最大 200）
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/store.TaskRun'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 任务运行历史
+      tags:
+      - 定时任务
   /users:
     get:
       produces:

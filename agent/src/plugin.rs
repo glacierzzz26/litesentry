@@ -205,7 +205,8 @@ impl PluginHost {
 
     /// 确保插件二进制可用。内置插件（清单命中且版本一致）→ 本地 SHA-256 复核，不走网络；
     /// 外部插件 → 缓存目录（按 plugin_id/version）校验，缺/旧则 FetchPlugin 下载。
-    async fn ensure_binary(&self, client: &mut crate::client::Client, token: &str, spec: &PluginSpec) -> Result<PathBuf> {
+    /// pub(crate)：S4 定时任务（task.rs run_one_shot 前）复用同一解析/下载/校验路径。
+    pub(crate) async fn ensure_binary(&self, client: &mut crate::client::Client, token: &str, spec: &PluginSpec) -> Result<PathBuf> {
         if let Some(entry) = crate::builtin::find(&spec.plugin_id) {
             if entry.version == spec.version {
                 return crate::builtin::verify(entry).map_err(|e| anyhow!(e));

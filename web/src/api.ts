@@ -4,6 +4,7 @@
 
 import type {
   Agent,
+  AgentPlugin,
   AlertEvent,
   AlertRule,
   ContainerSample,
@@ -13,8 +14,11 @@ import type {
   LoginResult,
   Overview,
   SaveFrpBody,
+  SaveTaskBody,
   SettingsBody,
   SettingsView,
+  Task,
+  TaskRun,
   User,
 } from './types';
 import { latestByKey } from './types';
@@ -168,11 +172,21 @@ export const api = {
     put<FrpConfigView>(`/api/frp/${encodeURIComponent(kind)}/${encodeURIComponent(agentId)}`, b),
   deleteFrpConfig: (kind: string, agentId: string) =>
     del<{ status: string }>(`/api/frp/${encodeURIComponent(kind)}/${encodeURIComponent(agentId)}`),
+
+  // ---- 定时任务（阶段二 S4）----
+  tasks: () => get<Task[]>('/api/tasks'),
+  createTask: (b: SaveTaskBody) => post<Task>('/api/tasks', b),
+  updateTask: (id: string, b: SaveTaskBody) => put<Task>(`/api/tasks/${encodeURIComponent(id)}`, b),
+  deleteTask: (id: string) => del<{ status: string }>(`/api/tasks/${encodeURIComponent(id)}`),
+  taskRuns: (id: string, limit?: number) =>
+    get<TaskRun[]>(`/api/tasks/${encodeURIComponent(id)}/runs${qs({ limit })}`),
+  agentPlugins: (agentId: string) => get<AgentPlugin[]>(`/api/agents/${encodeURIComponent(agentId)}/plugins`),
 };
 
 // 类型再导出，页面层直接从 api 引用也行
 export type {
   Agent,
+  AgentPlugin,
   AlertEvent,
   AlertRule,
   ContainerSample,
@@ -182,7 +196,10 @@ export type {
   LoginResult,
   Overview,
   SaveFrpBody,
+  SaveTaskBody,
   SettingsBody,
   SettingsView,
+  Task,
+  TaskRun,
   User,
 };

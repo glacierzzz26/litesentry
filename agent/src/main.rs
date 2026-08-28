@@ -8,6 +8,7 @@ mod client;
 mod config;
 mod frp;
 mod plugin;
+mod task;
 
 pub mod pb {
     tonic::include_proto!("litesentry");
@@ -81,6 +82,9 @@ async fn main() -> Result<()> {
     // S3：frp 进程管理器（frps/frpc，配置经 DesiredState 下发）
     let mut frp_mgr = frp::FrpManager::new(&cfg.frp_dir, &cfg.state_dir);
 
+    // S4：定时任务调度器（cron 触发插件一次性 run，结果回传落 task_runs）
+    let mut task_runner = task::TaskRunner::new();
+
     let mut applied_version: u64 = 0; // 已应用的 DesiredState 版本（心跳下发，等于即跳过）
 
     let mut ticker = time::interval(Duration::from_secs(cfg.interval_secs));
@@ -92,6 +96,9 @@ async fn main() -> Result<()> {
         batch.series = host.drain_series();
         // S3：frp 状态（进程 + 隧道）。未启用 → None（不占 proto 字段）
         batch.frp = frp_mgr.collect().await;
+        // S4：触发到期定时任务；后台 run 结果 + 本轮直接产生的报告汇入本次上报
+        task_runner.fire_due(&host, &mut client, &cfg.token).await;
+        batch.task_runs = task_runner.drain_reports();
 
         match client.push(&cfg.token, batch).await {
             Ok(ack) => {
@@ -107,9 +114,16 @@ async fn main() -> Result<()> {
                             tracing::warn!("应用 DesiredState 失败: {e}");
                             ok = false;
                         }
+                        // S4：定时任务定义（cron 解析失败仅告警，不阻塞版本推进）
+                        task_runner.apply(&ds.tasks, &ds.plugins);
                         if ok {
                             applied_version = ds.state_version;
-                            tracing::info!("已应用 DesiredState v{}（{} 个插件）", ds.state_version, ds.plugins.len());
+                            tracing::info!(
+                                "已应用 DesiredState v{}（{} 个插件，{} 个任务）",
+                                ds.state_version,
+                                ds.plugins.len(),
+                                ds.tasks.len()
+                            );
                         }
                     }
                 }
@@ -129,6 +143,6 @@ fn build_batch(agent_id: &str) -> MetricsBatch {
         containers: Vec::new(), // S2：容器采集迁入内置插件（container.info series）
         series: Vec::new(),     // 主循环汇入插件系列
         frp: None,              // 阶段二 S3：frp 状态
-        task_runs: Vec::new(),  // 阶段二 S4：定时任务执行结果
+        task_runs: Vec::new(),  // 主循环汇入定时任务执行结果（S4）
     }
 }

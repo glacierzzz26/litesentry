@@ -205,3 +205,56 @@ export interface SaveFrpBody {
   proxies: FrpTunnel[];
   enabled: boolean;
 }
+
+// ---- 定时任务（阶段二 S4）----
+
+/** 定时任务定义（REST 返回）。target_agent_id 前端不展示，仅用于编辑回填（空 = 公网机）。 */
+export interface Task {
+  id: string;
+  name: string;
+  description: string;
+  target_agent_id: string; // 空 = 公网机（server 同机 agent）
+  target_agent_name: string;
+  cron: string;
+  plugin_id: string;
+  args_json: string;
+  timeout_s: number;
+  enabled: boolean;
+  last_run_at?: string;
+  last_status: string; // ok | failed | timeout | skipped
+  last_output_tail: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 任务运行历史（agent 上报，append-only 审计）。 */
+export interface TaskRun {
+  id: string;
+  task_id: string;
+  agent_id: string;
+  status: string; // ok | failed | timeout | skipped
+  exit_code?: number;
+  output: string; // stdout/stderr 截断尾部
+  started_at: string;
+  finished_at?: string;
+}
+
+/** 任务写入体（target_agent_id 空 = 公网机）。 */
+export interface SaveTaskBody {
+  name: string;
+  description?: string;
+  target_agent_id: string;
+  cron: string;
+  plugin_id: string;
+  args_json?: string;
+  timeout_s?: number;
+  enabled?: boolean;
+}
+
+/** 目标 agent 已指派的插件（任务表单插件下拉数据源）。 */
+export interface AgentPlugin {
+  agent_id: string;
+  plugin_id: string;
+  version: string;
+  args_json: string;
+}
