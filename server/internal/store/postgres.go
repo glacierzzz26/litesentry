@@ -1000,6 +1000,12 @@ ON CONFLICT (agent_id) DO UPDATE SET
 	return err
 }
 
+func (p *Postgres) DeleteFrpConfig(ctx context.Context, kind, agentID string) error {
+	_, err := p.db.ExecContext(ctx,
+		`DELETE FROM frp_configs WHERE kind = $1 AND agent_id = $2`, kind, agentID)
+	return err
+}
+
 func (p *Postgres) QueryFrpStatus(ctx context.Context, agentID string) (*FrpStatus, error) {
 	var st FrpStatus
 	var ts int64

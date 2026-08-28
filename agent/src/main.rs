@@ -6,6 +6,7 @@
 mod builtin;
 mod client;
 mod config;
+mod frp;
 mod plugin;
 
 pub mod pb {
@@ -77,6 +78,9 @@ async fn main() -> Result<()> {
     // S2：拉起内置采集插件（host/docker/disk），always-on
     host.start_builtins(&mut client, &cfg.token).await;
 
+    // S3：frp 进程管理器（frps/frpc，配置经 DesiredState 下发）
+    let mut frp_mgr = frp::FrpManager::new(&cfg.frp_dir, &cfg.state_dir);
+
     let mut applied_version: u64 = 0; // 已应用的 DesiredState 版本（心跳下发，等于即跳过）
 
     let mut ticker = time::interval(Duration::from_secs(cfg.interval_secs));
@@ -86,17 +90,26 @@ async fn main() -> Result<()> {
         // S2：主机/容器/磁盘数据全部来自内置插件 series；host/containers 字段留空
         let mut batch = build_batch(&agent_id);
         batch.series = host.drain_series();
+        // S3：frp 状态（进程 + 隧道）。未启用 → None（不占 proto 字段）
+        batch.frp = frp_mgr.collect().await;
 
         match client.push(&cfg.token, batch).await {
             Ok(ack) => {
                 if let Some(ds) = ack.desired_state {
                     if ds.state_version != applied_version {
-                        match host.apply(&mut client, &cfg.token, &ds.plugins).await {
-                            Ok(()) => {
-                                applied_version = ds.state_version;
-                                tracing::info!("已应用 DesiredState v{}（{} 个插件）", ds.state_version, ds.plugins.len());
-                            }
-                            Err(e) => tracing::warn!("应用 DesiredState 失败: {e}"),
+                        // 全部应用成功才推进版本号，失败留待下次心跳重试
+                        let mut ok = true;
+                        if let Err(e) = frp_mgr.apply(&ds).await {
+                            tracing::warn!("应用 frp DesiredState 失败: {e}");
+                            ok = false;
+                        }
+                        if let Err(e) = host.apply(&mut client, &cfg.token, &ds.plugins).await {
+                            tracing::warn!("应用 DesiredState 失败: {e}");
+                            ok = false;
+                        }
+                        if ok {
+                            applied_version = ds.state_version;
+                            tracing::info!("已应用 DesiredState v{}（{} 个插件）", ds.state_version, ds.plugins.len());
                         }
                     }
                 }

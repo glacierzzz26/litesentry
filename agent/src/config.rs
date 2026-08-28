@@ -19,6 +19,10 @@ pub struct Config {
     pub interval_secs: u64,
     /// 插件缓存目录（下载的插件二进制按 plugin_id/version 存放，0700）
     pub plugin_dir: String,
+    /// frp 二进制目录（LS_FRP_DIR，默认 /usr/local/bin）：frpc / frps 预装于此
+    pub frp_dir: String,
+    /// frp 配置落盘目录（LS_STATE_DIR，默认 /var/lib/litesentry）：frp.toml（0600）
+    pub state_dir: String,
     /// 双向 TLS：CA 证书 PEM 路径（Agent 用它校验 Server 身份）
     pub tls_ca: String,
     /// 双向 TLS：Agent 客户端证书 PEM 路径
@@ -58,6 +62,9 @@ impl Config {
             interval_secs,
             plugin_dir: std::env::var("LS_PLUGIN_DIR")
                 .unwrap_or_else(|_| "/var/lib/litesentry/plugins".into()),
+            frp_dir: std::env::var("LS_FRP_DIR").unwrap_or_else(|_| "/usr/local/bin".into()),
+            state_dir: std::env::var("LS_STATE_DIR")
+                .unwrap_or_else(|_| "/var/lib/litesentry".into()),
             tls_ca: std::env::var("LS_TLS_CA").unwrap_or_default(),
             tls_cert: std::env::var("LS_TLS_CERT").unwrap_or_default(),
             tls_key: std::env::var("LS_TLS_KEY").unwrap_or_default(),

@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	litesentrypb "litesentry/server/gen"
+	"litesentry/server/internal/frp"
 	"litesentry/server/internal/store"
 )
 
@@ -412,9 +413,23 @@ func (s *Server) persist(ctx context.Context, batch *litesentrypb.MetricsBatch) 
 
 // desiredState 构造某 agent 的下发期望状态：插件 manifest + frp 配置 + 定时任务。
 // state_version = 内容哈希（FNV-1a 64bit）：内容不变则版本不变（agent 跳过重应用），任一变更则变化。
-// 注：frp 字段（frp_toml / frp_enabled）由 S3 的 frp 渲染包填充，S1 保持空。
 func (s *Server) desiredState(ctx context.Context, agentID string) (*litesentrypb.DesiredState, error) {
 	ds := &litesentrypb.DesiredState{}
+
+	// frp 配置（S3）：节点自身 frpc 优先；公网机（server 同机 agent）兜底 frps。
+	// 渲染的 toml 经 state_version 内容哈希联动 —— 配置变更自动触发 agent 重应用（含停进程）。
+	if cfg, err := s.store.GetFrpConfig(ctx, "frpc", agentID); err == nil && cfg.Enabled {
+		_, toml := frp.Render(cfg)
+		ds.FrpEnabled = true
+		ds.FrpToml = toml
+	} else if cfg, err := s.store.GetFrpConfig(ctx, "frps", ""); err == nil && cfg.Enabled {
+		serverID, _ := s.store.GetSetting(ctx, "server_agent_id")
+		if serverID == agentID {
+			_, toml := frp.Render(cfg)
+			ds.FrpEnabled = true
+			ds.FrpToml = toml
+		}
+	}
 
 	aps, err := s.store.AgentPlugins(ctx, agentID)
 	if err != nil {

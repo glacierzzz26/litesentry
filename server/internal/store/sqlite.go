@@ -1037,6 +1037,12 @@ ON CONFLICT(agent_id) DO UPDATE SET
 	return err
 }
 
+func (s *SQLite) DeleteFrpConfig(ctx context.Context, kind, agentID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM frp_configs WHERE kind = ? AND agent_id = ?`, kind, agentID)
+	return err
+}
+
 func (s *SQLite) QueryFrpStatus(ctx context.Context, agentID string) (*FrpStatus, error) {
 	var st FrpStatus
 	var running, ts int64

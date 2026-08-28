@@ -8,9 +8,11 @@ import type {
   AlertRule,
   ContainerSample,
   DiskSample,
+  FrpConfigView,
   HostSample,
   LoginResult,
   Overview,
+  SaveFrpBody,
   SettingsBody,
   SettingsView,
   User,
@@ -159,6 +161,13 @@ export const api = {
   settings: () => get<SettingsView>('/api/settings'),
   saveSettings: (b: SettingsBody) => put<SettingsView>('/api/settings', b),
   feishuTest: () => post<{ status: string; message: string }>('/api/settings/feishu-test'),
+
+  // ---- FRP 隧道 ----
+  frpConfigs: () => get<FrpConfigView[]>('/api/frp'),
+  saveFrpConfig: (kind: string, agentId: string, b: SaveFrpBody) =>
+    put<FrpConfigView>(`/api/frp/${encodeURIComponent(kind)}/${encodeURIComponent(agentId)}`, b),
+  deleteFrpConfig: (kind: string, agentId: string) =>
+    del<{ status: string }>(`/api/frp/${encodeURIComponent(kind)}/${encodeURIComponent(agentId)}`),
 };
 
 // 类型再导出，页面层直接从 api 引用也行
@@ -168,9 +177,11 @@ export type {
   AlertRule,
   ContainerSample,
   DiskSample,
+  FrpConfigView,
   HostSample,
   LoginResult,
   Overview,
+  SaveFrpBody,
   SettingsBody,
   SettingsView,
   User,

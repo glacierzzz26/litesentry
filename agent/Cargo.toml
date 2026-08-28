@@ -9,7 +9,7 @@ name = "litesentry-agent"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "process", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "process", "io-util", "net"] }
 tonic = { version = "0.12", features = ["tls"] }
 prost = "0.13"
 sysinfo = "0.33"

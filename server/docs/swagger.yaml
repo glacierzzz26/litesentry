@@ -1,10 +1,106 @@
 basePath: /api
 definitions:
+  api.assignPluginBody:
+    properties:
+      agent_id:
+        type: string
+      args_json:
+        type: string
+      version:
+        type: string
+    type: object
+  api.changePwdReq:
+    properties:
+      new_password:
+        type: string
+      old_password:
+        type: string
+    type: object
+  api.frpView:
+    properties:
+      agent_id:
+        description: frps 行恒为 "server"（哨兵）；前端不展示
+        type: string
+      agent_name:
+        type: string
+      enabled:
+        type: boolean
+      kind:
+        type: string
+      proxies:
+        items:
+          $ref: '#/definitions/store.FrpTunnel'
+        type: array
+      server_addr:
+        type: string
+      server_port:
+        type: integer
+      status:
+        $ref: '#/definitions/store.FrpStatus'
+      token_set:
+        type: boolean
+      updated_at:
+        type: string
+    type: object
+  api.loginReq:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    type: object
+  api.loginResp:
+    properties:
+      expires_at:
+        type: string
+      must_change_password:
+        type: boolean
+      token:
+        type: string
+      user:
+        $ref: '#/definitions/store.User'
+    type: object
+  api.resetPwdBody:
+    properties:
+      password:
+        type: string
+    type: object
+  api.saveFrpBody:
+    properties:
+      enabled:
+        type: boolean
+      proxies:
+        items:
+          $ref: '#/definitions/store.FrpTunnel'
+        type: array
+      server_addr:
+        type: string
+      server_port:
+        type: integer
+      token:
+        type: string
+    type: object
   api.settingsView:
     properties:
       feishu_secret_set:
         type: boolean
       feishu_webhook:
+        type: string
+    type: object
+  api.updateUserBody:
+    properties:
+      display_name:
+        type: string
+      role:
+        type: string
+    type: object
+  api.userBody:
+    properties:
+      display_name:
+        type: string
+      password:
+        type: string
+      username:
         type: string
     type: object
   store.Agent:
@@ -147,6 +243,51 @@ definitions:
       used:
         type: integer
     type: object
+  store.FrpStatus:
+    properties:
+      error:
+        type: string
+      frp_version:
+        type: string
+      running:
+        type: boolean
+      ts:
+        type: string
+      tunnels:
+        items:
+          $ref: '#/definitions/store.FrpTunnelStatus'
+        type: array
+    type: object
+  store.FrpTunnel:
+    properties:
+      local_ip:
+        type: string
+      local_port:
+        type: integer
+      name:
+        type: string
+      remote_port:
+        type: integer
+      type:
+        description: tcp | udp | http | https | stcp ...
+        type: string
+    type: object
+  store.FrpTunnelStatus:
+    properties:
+      err:
+        type: string
+      name:
+        type: string
+      rx_bytes:
+        type: integer
+      status:
+        description: online | offline | error
+        type: string
+      tx_bytes:
+        type: integer
+      type:
+        type: string
+    type: object
   store.HostSample:
     properties:
       agent_cpu_pct:
@@ -199,6 +340,67 @@ definitions:
         type: string
       scope:
         description: global | link | loopback
+        type: string
+    type: object
+  store.Overview:
+    properties:
+      disk_max:
+        additionalProperties:
+          format: float64
+          type: number
+        description: agent_id → 最高挂载点使用率%
+        type: object
+      firing:
+        description: 当前 firing 事件数
+        type: integer
+      hosts:
+        description: 每节点最近一条主机样本
+        items:
+          $ref: '#/definitions/store.HostSample'
+        type: array
+    type: object
+  store.Plugin:
+    properties:
+      args_schema:
+        description: 参数说明（前端表单用）
+        type: string
+      created_at:
+        type: string
+      id:
+        description: 插件标识（稳定跨版本），如 "hello"
+        type: string
+      kind:
+        description: 阶段二仅 binary
+        type: string
+      name:
+        description: 展示名
+        type: string
+      sha256:
+        type: string
+      size:
+        type: integer
+      version:
+        type: string
+    type: object
+  store.User:
+    properties:
+      created_at:
+        type: string
+      display_name:
+        type: string
+      id:
+        type: string
+      last_login_at:
+        type: string
+      must_change_password:
+        description: 首次登录强制改密
+        type: boolean
+      role:
+        description: 阶段一全 admin，列预留
+        type: string
+      updated_at:
+        type: string
+      username:
         type: string
     type: object
 host: localhost:8080
@@ -492,6 +694,187 @@ paths:
       summary: 更新告警规则
       tags:
       - 告警
+  /auth/change-password:
+    post:
+      consumes:
+      - application/json
+      description: 校验旧密码，写入新密码并清除 must_change_password
+      parameters:
+      - description: 旧/新密码
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.changePwdReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: 旧密码错误 / 新密码过短
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 修改密码
+      tags:
+      - 认证
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: 校验用户名密码，成功签发 JWT 并回写上次登录时间；新用户/被重置密码的用户返回 must_change_password=true
+      parameters:
+      - description: 用户名密码
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.loginReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.loginResp'
+        "400":
+          description: 参数缺失
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: 凭据错误
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "429":
+          description: 失败次数过多已锁定
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 登录
+      tags:
+      - 认证
+  /auth/me:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/store.User'
+      security:
+      - BearerAuth: []
+      summary: 当前用户
+      tags:
+      - 认证
+  /frp:
+    get:
+      description: 全部 frps/frpc 配置，join 最近上报状态与目标节点主机名（token 不回传）
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.frpView'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: FRP 配置列表
+      tags:
+      - FRP
+  /frp/{kind}/{agent_id}:
+    delete:
+      description: 删除 frps/frpc 配置并下线对应 frp 进程（agent 下次心跳生效）
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 删除 FRP 配置
+      tags:
+      - FRP
+    put:
+      consumes:
+      - application/json
+      description: 新建（agent_id 不存在时）或更新 frps/frpc 配置；token 留空 = 保留原值
+      parameters:
+      - description: frps | frpc
+        in: path
+        name: kind
+        required: true
+        type: string
+      - description: 目标 agent（frps 恒为 server）
+        in: path
+        name: agent_id
+        required: true
+        type: string
+      - description: 配置体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.saveFrpBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.frpView'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 保存 FRP 配置
+      tags:
+      - FRP
   /health:
     get:
       produces:
@@ -506,6 +889,178 @@ paths:
       summary: 健康检查
       tags:
       - 系统
+  /overview:
+    get:
+      description: 一次返回窗口内每节点最新主机样本、每节点最高磁盘占用、当前 firing 事件数
+      parameters:
+      - description: 起始 unix 秒（默认 1 小时前）
+        in: query
+        name: from
+        type: integer
+      - description: 结束 unix 秒（默认当前）
+        in: query
+        name: to
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/store.Overview'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 总览聚合
+      tags:
+      - 时序
+  /plugins:
+    get:
+      description: 全部插件（含各版本元信息，不含二进制内容）
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/store.Plugin'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 插件仓库
+      tags:
+      - 插件
+    post:
+      consumes:
+      - multipart/form-data
+      description: 上传不可变插件版本（multipart：file + id/name/version）；服务端计算 SHA-256
+      parameters:
+      - description: 插件二进制
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: 插件标识（稳定跨版本）
+        in: formData
+        name: id
+        required: true
+        type: string
+      - description: 展示名
+        in: formData
+        name: name
+        required: true
+        type: string
+      - description: 版本号（同 id 不可重复）
+        in: formData
+        name: version
+        required: true
+        type: string
+      - description: 参数说明（前端表单用，JSON）
+        in: formData
+        name: args_schema
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/store.Plugin'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: 版本已存在
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 上传插件
+      tags:
+      - 插件
+  /plugins/{id}:
+    get:
+      description: 某插件 id 的全部版本元信息
+      parameters:
+      - description: 插件标识
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/store.Plugin'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 插件详情
+      tags:
+      - 插件
+  /plugins/{id}/assign:
+    post:
+      consumes:
+      - application/json
+      description: 将某版本插件指派到指定 agent（覆盖旧指派）；agent 下次心跳拉取并执行
+      parameters:
+      - description: 插件标识
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: agent_id / version / args_json
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.assignPluginBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: 插件版本不存在
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 指派插件
+      tags:
+      - 插件
   /settings:
     get:
       description: 飞书 webhook 与 secret 是否存在（secret 不回显明文）
@@ -570,9 +1125,166 @@ paths:
       summary: 测试飞书机器人
       tags:
       - 设置
+  /users:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/store.User'
+            type: array
+      security:
+      - BearerAuth: []
+      summary: 用户列表
+      tags:
+      - 用户
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 用户名/初始密码/显示名
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.userBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/store.User'
+        "400":
+          description: 用户名或密码不合规
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: 用户名已存在
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 新建用户
+      tags:
+      - 用户
+  /users/{id}:
+    delete:
+      parameters:
+      - description: 用户 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: 删自己 / 删最后一个用户
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 删除用户
+      tags:
+      - 用户
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 用户 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 显示名/角色
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.updateUserBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/store.User'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 更新用户
+      tags:
+      - 用户
+  /users/{id}/password:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 用户 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 新密码
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.resetPwdBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/store.User'
+        "400":
+          description: 密码过短
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 重置密码
+      tags:
+      - 用户
 securityDefinitions:
   BearerAuth:
-    description: Agent/前端共享 token，格式：Bearer <token>
+    description: Web 面板 JWT（POST /api/auth/login 获取），格式：Bearer <jwt>
     in: header
     name: Authorization
     type: apiKey

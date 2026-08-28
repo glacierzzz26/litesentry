@@ -331,6 +331,8 @@ type Store interface {
 	// UpsertFrpStatus 覆盖写某 agent 最近一次 frp 状态。QueryFrpStatus 读最近一次。
 	UpsertFrpStatus(ctx context.Context, agentID string, s *FrpStatus) error
 	QueryFrpStatus(ctx context.Context, agentID string) (*FrpStatus, error)
+	// DeleteFrpConfig 删除一条 frp 配置（frps 行的 agent_id=''）。删除后下次 DesiredState 不带 frp → agent 停进程。
+	DeleteFrpConfig(ctx context.Context, kind, agentID string) error
 
 	// Cleanup 删除超过保留期（默认 30 天）的时序数据，返回清理行数。
 	Cleanup(ctx context.Context, retention time.Duration) (int64, error)

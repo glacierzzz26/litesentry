@@ -394,7 +394,7 @@ rpc FetchPlugin(PluginRequest) returns (stream Chunk);   // 流式分块 + sha25
 
 ## FRP（frps + frpc 均由 agent 管理）
 
-- **frps**：公网机 agent 管理本机 frps —— 写 `frps.toml`、启停 frps、拉 frps admin API（`/api/status`）拿隧道/流量 → 上报
+- **frps**：公网机 agent 管理本机 frps —— 写 `frps.toml`、启停 frps、拉 admin API（实测 frps 为 `/api/serverinfo`，仅服务健康/版本；frpc 为 `/api/status` 隧道明细）→ 上报
 - **frpc**：内网机 agent 管理本机 frpc —— 同上，写 `frpc.toml`、启停、拉 admin API → 上报
 - Server 只存配置（`frp_configs` 表，frps 与每 agent frpc 一视同仁）、经 DesiredState 下发、收状态落 `frp_status` 表，前端展示
 - 配置渲染在 Server 侧完成（frpc.toml / frps.toml 字符串随 DesiredState 下发），Agent 不做模板逻辑
@@ -429,6 +429,27 @@ rpc FetchPlugin(PluginRequest) returns (stream Chunk);   // 流式分块 + sha25
 - **D4 agent_cpu/agent_mem 语义保持**：host 插件读 `/proc/<getppid()>/stat` + `/proc/<getppid()>/statm`（ppid = agent，插件由 agent 直接 spawn），口径与阶段一「Agent 自身进程占用」一致
 - **向后兼容**：`persist()` 保留旧 `host`/`containers` proto 路径（旧 agent 不受影响）；翻译结果与 proto 实体合并走同一 `UpsertAgent`/`AppendBatch` 事务。端到端已验：新 agent 的 host.info/host.ip/disk.usage/container.info 全部翻译回现有表，面板 `/api/overview`、`/api/agents`、容器页数据与迁移前一致；smoke 旧格式 batch 仍落 host/container/disk 表
 
+### FRP 已落地（S3 agent 管理 frps/frpc）
+
+**决策落地**：
+
+- **E1 内置 frp 二进制 = 预装**：Agent 按 `${LS_FRP_DIR}/{frpc,frps}`（默认 `/usr/local/bin`）找二进制；缺失 → 上报 `FrpStatus{running:false, error:"…未安装"}`。frp 官方 release 单二进制，由包管理预装最简；Server 分发 frp 二进制留作后续加固项
+- **E2 kind 携带 = 渲染 toml 首行标记注释**：proto 冻结不加字段，Server 渲染 toml 首行写 `# litesentry-kind: frpc|frps`，Agent 解析选择二进制（优于按 toml 结构猜测）
+- **E3 admin API = 渲染进 toml 的 webServer**：`webServer{127.0.0.1, frpc=7400/frps=7500, user=admin, password=<auth token>}`，Agent 行扫描 toml 解析三键 → Basic auth 轮询 admin API。**实测修正（frp 0.71.0）**：frps **无 `/api/status`**（404），用 `/api/serverinfo`（version / bindPort / clientCounts，无批量隧道端点）；frpc 用 `/api/status`（隧道明细 name/type/status/err/local_addr）。**0.71 的 `/api/status` 不含 per-tunnel 流量字段**（`/api/proxy/*`、`/api/bandwidth` 均 404）→ 前端不展示 RX/TX 列，proto 的 `rx_bytes/tx_bytes` 字段保留，frp 后续版本暴露流量后即可填充（Agent 解析器已对缺字段容错）
+- **E4 配置落盘**：`${LS_STATE_DIR}/frp.toml`（默认 `/var/lib/litesentry/frp.toml`），0600（含 auth token）；仅 toml 内容变化才重启进程
+- **E5 应用门 = DesiredState state_version**（与插件同一门）：配置增删改 → FNV-1a 哈希变 → 门开 → 重写 toml + 启停；agent 重启首轮 push 幂等对齐（toml 未变不重写，避免无谓 inode 更新）
+- **E6 不上报 vs 上报**：`frp_enabled=false` → `batch.frp=None`（不占 proto 字段）；启用但进程死/未装 → `Some{FrpStatus{running:false, error}}`（覆盖写，前端可排查）
+- **E7 Agent 无重量 HTTP 客户端**：手写最小 HTTP/1.1 GET（`tokio::net::TcpStream`，加 tokio `net` feature）+ 极简 base64，admin JSON 用 serde_json 解析；agent 单二进制 4.1MB（≤10MB 硬约束内）
+- **自愈（外部 kill 恢复）**：进程被外部 kill / 意外崩溃 → `collect()` 每心跳探测「期望运行但已死」→ 重拉，10s 限流防崩溃热循环。**实现要点**：重拉放 `collect()` 而非 `apply()`——`apply()` 只在 state_version 变化时执行，外部 kill 不改 state_version，放 apply 里永远不触发（早期实现即如此，已修）
+
+**端到端已验**（本地双 agent：a-pub 公网机 frps + b-intra 内网机 frpc，同一物理机用 `LS_AGENT_ID` 区分注册）：
+- 配置经 REST 建 frps/frpc → DesiredState 下发 → 两 agent 拉起真 frp 进程 → frp_status 落库（running / frp_version / 隧道状态）
+- 隧道连通：`curl http://127.0.0.1:7001/` → 200（frps:7001 → frpc → 本机 http server）
+- 负面 1：kill frps → agent 下个心跳自愈重拉，隧道恢复
+- 负面 2：DELETE frpc 配置 → agent 下个心跳停掉 frpc；重建配置 → 重新拉起
+- 回归：S2 的 host/container/disk series 与 FRP 并存不受影响
+- 前端 FRP 页：配置卡片（类型 / 目标主机名 / 启用开关 / 运行状态）+ 隧道状态表 + 新建/编辑/删除；token 仅写入不回显（编辑留空 = 保留原值）；agent_id 永不出现在 UI
+
 ## Server 数据模型（store 包新增表）
 
 `plugins`（id, name, kind, version, sha256, size, args_schema, created_at, UNIQUE(id,version)）·
@@ -452,5 +473,5 @@ rpc FetchPlugin(PluginRequest) returns (stream Chunk);   // 流式分块 + sha25
 1. **S0 设计定稿**：本文档更新（已完成）
 2. **S1 地基**：proto 扩展 + Agent 插件宿主（下载/校验/子进程/JSON-line）+ Server 插件仓库 / DesiredState / Series 落库 → hello 插件端到端（已完成，见「采集迁移已落地」）
 3. **S2 采集迁移**：host/docker/disk 迁移为内置插件，server 翻译回现有表 → 面板数据与迁移前一致（已完成，见「采集迁移已落地」）
-4. **S3 FRP**：agent frp 管理器 + server frp 配置存储/下发 + 前端 FRP 页
+4. **S3 FRP**：agent frp 管理器 + server frp 配置存储/下发 + 前端 FRP 页（已完成，见「FRP 已落地」）
 5. **S4 定时任务**：任务模型 + agent 本地 cron + 结果回传 + 前端定时任务页

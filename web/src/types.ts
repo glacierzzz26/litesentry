@@ -152,3 +152,56 @@ export interface SettingsBody {
   feishu_secret?: string;
   feishu_secret_clear?: boolean;
 }
+
+// ---- FRP 隧道 ----
+
+/** frpc 隧道配置项（渲染进 [[proxies]]）。 */
+export interface FrpTunnel {
+  name: string;
+  type: string; // tcp | udp | http | https | stcp ...
+  local_ip?: string;
+  local_port?: number;
+  remote_port?: number;
+}
+
+/** 单隧道实时状态（agent 经 admin API 轮询上报）。 */
+export interface FrpTunnelStatus {
+  name: string;
+  type: string;
+  status: string; // online | offline | error
+  err?: string;
+  rx_bytes: number;
+  tx_bytes: number;
+}
+
+/** 本机 frp 进程 + 隧道整体状态（每次 Push 覆盖写）。 */
+export interface FrpStatus {
+  running: boolean;
+  frp_version: string;
+  error: string;
+  tunnels: FrpTunnelStatus[];
+  ts: string;
+}
+
+/** FRP 配置视图（REST 返回，token 不回传）。agent_id 前端不展示，仅用于 PUT/DELETE 路径。 */
+export interface FrpConfigView {
+  kind: string; // frps | frpc
+  agent_id: string; // frps 行恒为 "server"（哨兵）
+  agent_name: string;
+  server_addr: string;
+  server_port: number;
+  proxies: FrpTunnel[];
+  enabled: boolean;
+  token_set: boolean;
+  updated_at: string;
+  status?: FrpStatus;
+}
+
+/** FRP 配置写入体。token 为空 = 保留原值。 */
+export interface SaveFrpBody {
+  server_addr: string;
+  server_port: number;
+  token?: string;
+  proxies: FrpTunnel[];
+  enabled: boolean;
+}
