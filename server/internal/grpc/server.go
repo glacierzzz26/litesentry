@@ -407,6 +407,10 @@ func (s *Server) persist(ctx context.Context, batch *litesentrypb.MetricsBatch) 
 		if err := s.store.UpdateTaskLastRun(ctx, tr.GetTaskId(), tr.GetStatus(), tr.GetOutput(), started); err != nil {
 			return err
 		}
+		// 立即运行触发已消费：无论结果如何，清除 run_now 标记（让 DesiredState 哈希回落，agent 恢复纯 cron 调度）。
+		if err := s.store.SetTaskRunNow(ctx, tr.GetTaskId(), false); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -471,6 +475,7 @@ func (s *Server) desiredState(ctx context.Context, agentID string) (*litesentryp
 			PluginId: t.PluginID,
 			ArgsJson: t.ArgsJSON,
 			TimeoutS: t.TimeoutS,
+			RunNow:   t.RunNow,
 		})
 	}
 
@@ -506,6 +511,7 @@ func desiredStateVersion(ds *litesentrypb.DesiredState) uint64 {
 		sep(t.GetPluginId())
 		sep(t.GetArgsJson())
 		sep(strconv.FormatUint(uint64(t.GetTimeoutS()), 10))
+		sep(strconv.FormatBool(t.GetRunNow())) // run_now 翻转 → 哈希变 → agent 重应用（触发/回落）
 	}
 	return h.Sum64()
 }

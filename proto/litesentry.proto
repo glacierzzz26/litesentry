@@ -105,6 +105,7 @@ message TaskSpec {
   string plugin_id = 3;
   string args_json = 4;
   uint32 timeout_s = 5;
+  bool   run_now   = 6;   // 立即运行标记：Server 置位，agent 下个心跳立即执行一次，收到报告后 Server 清除
 }
 
 // 心跳响应下发的期望状态：Agent 发现 state_version != 已应用版本时重新应用。

@@ -89,6 +89,7 @@ func (s *Server) Routes() *gin.Engine {
 		api.POST("/tasks", s.createTask)
 		api.PUT("/tasks/:id", s.updateTask)
 		api.DELETE("/tasks/:id", s.deleteTask)
+		api.POST("/tasks/:id/run", s.runTask)
 		api.GET("/tasks/:id/runs", s.taskRuns)
 		api.GET("/agents/:id/plugins", s.agentPlugins)
 

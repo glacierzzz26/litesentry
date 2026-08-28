@@ -184,6 +184,7 @@ type Task struct {
 	ArgsJSON       string     `json:"args_json"`
 	TimeoutS       uint32     `json:"timeout_s"`
 	Enabled        bool       `json:"enabled"`
+	RunNow         bool       `json:"run_now"` // 立即运行标记：POST /run 置位，agent 下心跳执行一次后 Server 清除
 	LastRunAt      *time.Time `json:"last_run_at,omitempty"`
 	LastStatus     string     `json:"last_status"` // ok | failed | timeout | skipped
 	LastOutputTail string     `json:"last_output_tail"`
@@ -323,6 +324,8 @@ type Store interface {
 	QueryTaskRuns(ctx context.Context, taskID string, limit int) ([]*TaskRun, error)
 	// UpdateTaskLastRun 回写任务最近一次执行的摘要（面板列表用，避免 join）。
 	UpdateTaskLastRun(ctx context.Context, taskID, status, outputTail string, at time.Time) error
+	// SetTaskRunNow 置位/清除任务「立即运行」标记（POST /run 置位，收到执行报告后清除）。
+	SetTaskRunNow(ctx context.Context, taskID string, runNow bool) error
 
 	// ---- frp 配置 / 状态（阶段二）----
 	SaveFrpConfig(ctx context.Context, c *FrpConfig) error

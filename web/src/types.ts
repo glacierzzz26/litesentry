@@ -220,6 +220,7 @@ export interface Task {
   args_json: string;
   timeout_s: number;
   enabled: boolean;
+  run_now?: boolean; // 立即运行标记：已触发（等 agent 执行报告回清）时为 true
   last_run_at?: string;
   last_status: string; // ok | failed | timeout | skipped
   last_output_tail: string;

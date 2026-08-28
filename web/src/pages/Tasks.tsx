@@ -22,7 +22,7 @@ import {
   Switch,
   Tag,
 } from 'antd';
-import { HistoryOutlined, PlusOutlined } from '@ant-design/icons';
+import { HistoryOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { api } from '../api';
 import type { Agent, AgentPlugin, Task, TaskRun } from '../types';
 
@@ -72,6 +72,7 @@ export default function Tasks() {
   const [editing, setEditing] = useState<Task | null>(null);
   const [runsTask, setRunsTask] = useState<Task | null>(null);
   const [runs, setRuns] = useState<TaskRun[]>([]);
+  const [runningId, setRunningId] = useState<string | null>(null); // 立即运行请求中的任务
   const [pluginOpts, setPluginOpts] = useState<AgentPlugin[]>([]);
   const [form] = Form.useForm<Record<string, unknown>>();
 
@@ -179,6 +180,19 @@ export default function Tasks() {
     }
   };
 
+  const runNow = async (t: Task) => {
+    setRunningId(t.id);
+    try {
+      await api.runTask(t.id);
+      message.success('已触发，目标节点下个心跳立即执行一次');
+      load();
+    } catch (e) {
+      message.error(String(e).replace(/^Error:\s*/, ''));
+    } finally {
+      setRunningId(null);
+    }
+  };
+
   const openRuns = async (t: Task) => {
     setRunsTask(t);
     setRuns([]);
@@ -225,6 +239,16 @@ export default function Tasks() {
               )}
               <div className="ml-auto flex items-center gap-3">
                 <Switch size="small" checked={t.enabled} onChange={(c) => toggle(t, c)} />
+                <Button
+                  size="small"
+                  type="link"
+                  icon={<ThunderboltOutlined />}
+                  disabled={!t.enabled || t.run_now}
+                  loading={runningId === t.id}
+                  onClick={() => runNow(t)}
+                >
+                  {t.run_now ? '已触发' : '立即运行'}
+                </Button>
                 <Button size="small" type="link" onClick={() => openEdit(t)}>编辑</Button>
                 <Button size="small" type="link" icon={<HistoryOutlined />} onClick={() => openRuns(t)}>
                   运行记录

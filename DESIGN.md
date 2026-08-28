@@ -471,10 +471,20 @@ rpc FetchPlugin(PluginRequest) returns (stream Chunk);   // 流式分块 + sha25
 - 前端任务页 + 运行历史；target_agent_name 显示主机名（DESKTOP-6R75NEG），agent_id 绝不出现在 UI
 - 回归：S2 host/docker/disk 采集与任务调度并存不受影响
 
+**S4 后续加固已落地**（task_runs 保留裁剪 + 任务「立即运行」手动触发）：
+
+- **保留裁剪（S4.1）**：`task_runs` 并入 Server 既有每小时 `Cleanup()`（`--retention`，默认 30d，与时序数据同口径）的 DELETE 列表（按 `started_at` 裁剪超期行），并补 `idx_task_runs_started` 索引免全表扫。零新增设置项/前端
+- **立即运行（S4.2）**：`TaskSpec` 新增 `run_now` 字段（proto 字段 6，最小扩展）→ `POST /api/tasks/:id/run` 置位 → DesiredState 经 push/ack 下发（**无新 RPC**，适配 NAT 后 agent）→ agent 下个心跳立即执行一次（**不占 cron 边界、不推进 next_fire**）→ 结果照常落 `task_runs` → Server `persist()` 收到报告即清除标记（DesiredState 哈希回落，agent 恢复纯 cron）
+- **防重复**：`run_now_fired`（HashSet）放 **TaskRunner 层跨 apply 持久**——触发后、Server 清除前的不相关配置变更重 apply 不会重复执行；任务删除 / Server 清除后随 apply 移除，可再次手动触发（**触发可重复**）
+- **离线边界**：任务离线时触发 → run_now 保持置位 → 节点重连首轮 apply 即执行（语义「尽快执行」）
+- **前端**：任务卡片「立即运行」按钮（`enabled && !run_now` 可点；`run_now=true` 显示「已触发」禁用，15s 轮询回清后恢复）
+
+**加固后 E2E 已验**：cron=`0 0 1 1 *`（明年到期，与 cron 触发可区分）+ `POST /api/tasks/:id/run` → 响应 `run_now=true` → agent 日志「任务 … 触发（立即运行）：hello@0.1.0」→ `task_runs` 新行 ok/exit 0 → 任务 `run_now` 自动回清 false；连点两次均立即执行（可重复）；停用任务 → POST /run 400「任务已停用，请先启用」；`* * * * *` 回归仍按分钟触发（日志无「立即运行」后缀）；保留裁剪经 store 单测（2h 前旧行被清、近期行保留）
+
 ## Server 数据模型（store 包新增表）
 
 `plugins`（id, name, kind, version, sha256, size, args_schema, created_at, UNIQUE(id,version)）·
-`tasks`（id, name, target_agent_id, cron, plugin_id, args_json, timeout_s, enabled, last_run_*, created_at, updated_at）·
+`tasks`（id, name, target_agent_id, cron, plugin_id, args_json, timeout_s, enabled, run_now, last_run_*, created_at, updated_at）·
 `task_runs`（id, task_id, agent_id, status, exit_code, output, started_at, finished_at）·
 `frp_configs`（kind, agent_id, server_addr, server_port, token, proxies JSON, state_version, enabled）·
 `frp_status`（agent_id, name, type, status, err, rx/tx_bytes, frp_running, frp_version, ts）

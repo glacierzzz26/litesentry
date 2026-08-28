@@ -155,7 +155,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT '',
   target_agent_id TEXT DEFAULT '', cron TEXT NOT NULL, plugin_id TEXT NOT NULL,
   args_json TEXT DEFAULT '', timeout_s BIGINT NOT NULL DEFAULT 60,
-  enabled BOOLEAN NOT NULL DEFAULT TRUE, last_run_at BIGINT, last_status TEXT DEFAULT '',
+  enabled BOOLEAN NOT NULL DEFAULT TRUE, run_now BOOLEAN NOT NULL DEFAULT FALSE,
+  last_run_at BIGINT, last_status TEXT DEFAULT '',
   last_output_tail TEXT DEFAULT '', created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS task_runs (
@@ -164,6 +165,7 @@ CREATE TABLE IF NOT EXISTS task_runs (
   started_at BIGINT NOT NULL, finished_at BIGINT
 );
 CREATE INDEX IF NOT EXISTS idx_task_runs_task ON task_runs (task_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_task_runs_started ON task_runs (started_at);
 CREATE TABLE IF NOT EXISTS frp_configs (
   kind TEXT NOT NULL, agent_id TEXT NOT NULL DEFAULT '',
   server_addr TEXT DEFAULT '', server_port INTEGER DEFAULT 7000, token TEXT DEFAULT '',
@@ -188,6 +190,7 @@ func (p *Postgres) migrate() error {
 		`ALTER TABLE host_metrics ADD COLUMN IF NOT EXISTS agent_mem_rss BIGINT`,
 		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS machine_id TEXT`,
 		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS version TEXT`,
+		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS run_now BOOLEAN NOT NULL DEFAULT FALSE`,
 	} {
 		if _, err := p.db.Exec(q); err != nil {
 			return err
@@ -803,7 +806,7 @@ INSERT INTO series (agent_id, ts, name, tags, fields) VALUES ($1, $2, $3, $4, $5
 // ---- 阶段二：定时任务 ----
 
 const pgTaskCols = `id, name, description, target_agent_id, cron, plugin_id, args_json,
-  timeout_s, enabled, last_run_at, last_status, last_output_tail, created_at, updated_at`
+  timeout_s, enabled, run_now, last_run_at, last_status, last_output_tail, created_at, updated_at`
 
 // scanTaskPG 扫一行任务（PG 的 BOOLEAN 直接扫入 bool）。
 func scanTaskPG(scan func(dest ...any) error) (*Task, error) {
@@ -811,7 +814,7 @@ func scanTaskPG(scan func(dest ...any) error) (*Task, error) {
 	var createdAt, updatedAt int64
 	var lastRunAt sql.NullInt64
 	if err := scan(&t.ID, &t.Name, &t.Description, &t.TargetAgentID, &t.Cron, &t.PluginID, &t.ArgsJSON,
-		&t.TimeoutS, &t.Enabled, &lastRunAt, &t.LastStatus, &t.LastOutputTail, &createdAt, &updatedAt); err != nil {
+		&t.TimeoutS, &t.Enabled, &t.RunNow, &lastRunAt, &t.LastStatus, &t.LastOutputTail, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	t.CreatedAt = time.Unix(createdAt, 0).UTC()
@@ -926,6 +929,13 @@ UPDATE tasks SET last_run_at=$1, last_status=$2, last_output_tail=$3 WHERE id=$4
 	return err
 }
 
+// SetTaskRunNow 置位/清除任务「立即运行」标记（POST /run 置位，收到执行报告后清除）。
+func (p *Postgres) SetTaskRunNow(ctx context.Context, taskID string, runNow bool) error {
+	_, err := p.db.ExecContext(ctx, `UPDATE tasks SET run_now=$1, updated_at=$2 WHERE id=$3`,
+		runNow, time.Now().Unix(), taskID)
+	return err
+}
+
 // ---- 阶段二：frp 配置 / 状态 ----
 
 func (p *Postgres) SaveFrpConfig(ctx context.Context, c *FrpConfig) error {
@@ -1030,6 +1040,7 @@ func (p *Postgres) Cleanup(ctx context.Context, retention time.Duration) (int64,
 		`DELETE FROM disk_metrics WHERE ts < $1`,
 		`DELETE FROM container_metrics WHERE ts < $1`,
 		`DELETE FROM alert_events WHERE started_at < $1`,
+		`DELETE FROM task_runs WHERE started_at < $1`,
 	} {
 		res, err := p.db.ExecContext(ctx, q, cutoff)
 		if err != nil {

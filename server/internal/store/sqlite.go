@@ -164,7 +164,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT '',
   target_agent_id TEXT DEFAULT '', cron TEXT NOT NULL, plugin_id TEXT NOT NULL,
   args_json TEXT DEFAULT '', timeout_s INTEGER NOT NULL DEFAULT 60,
-  enabled INTEGER NOT NULL DEFAULT 1, last_run_at INTEGER, last_status TEXT DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1, run_now INTEGER NOT NULL DEFAULT 0,
+  last_run_at INTEGER, last_status TEXT DEFAULT '',
   last_output_tail TEXT DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS task_runs (
@@ -173,6 +174,7 @@ CREATE TABLE IF NOT EXISTS task_runs (
   started_at INTEGER NOT NULL, finished_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_task_runs_task ON task_runs (task_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_task_runs_started ON task_runs (started_at);
 CREATE TABLE IF NOT EXISTS frp_configs (
   kind TEXT NOT NULL, agent_id TEXT NOT NULL DEFAULT '',
   server_addr TEXT DEFAULT '', server_port INTEGER DEFAULT 7000, token TEXT DEFAULT '',
@@ -197,6 +199,7 @@ func (s *SQLite) migrate() error {
 		{"host_metrics", "agent_mem_rss", `ALTER TABLE host_metrics ADD COLUMN agent_mem_rss INTEGER`},
 		{"agents", "machine_id", `ALTER TABLE agents ADD COLUMN machine_id TEXT`},
 		{"agents", "version", `ALTER TABLE agents ADD COLUMN version TEXT`},
+		{"tasks", "run_now", `ALTER TABLE tasks ADD COLUMN run_now INTEGER NOT NULL DEFAULT 0`},
 	} {
 		has, err := s.hasColumn(mc.table, mc.col)
 		if err != nil {
@@ -837,18 +840,19 @@ INSERT INTO series (agent_id, ts, name, tags, fields) VALUES (?, ?, ?, ?, ?)`,
 // ---- 阶段二：定时任务 ----
 
 const taskCols = `id, name, description, target_agent_id, cron, plugin_id, args_json,
-  timeout_s, enabled, last_run_at, last_status, last_output_tail, created_at, updated_at`
+  timeout_s, enabled, run_now, last_run_at, last_status, last_output_tail, created_at, updated_at`
 
 // scanTask 扫一行任务（*sql.Row.Scan / *sql.Rows.Scan 均满足该签名）。
 func scanTask(scan func(dest ...any) error) (*Task, error) {
 	var t Task
-	var enabled, createdAt, updatedAt int64
+	var enabled, runNow, createdAt, updatedAt int64
 	var lastRunAt sql.NullInt64
 	if err := scan(&t.ID, &t.Name, &t.Description, &t.TargetAgentID, &t.Cron, &t.PluginID, &t.ArgsJSON,
-		&t.TimeoutS, &enabled, &lastRunAt, &t.LastStatus, &t.LastOutputTail, &createdAt, &updatedAt); err != nil {
+		&t.TimeoutS, &enabled, &runNow, &lastRunAt, &t.LastStatus, &t.LastOutputTail, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	t.Enabled = enabled != 0
+	t.RunNow = runNow != 0
 	t.CreatedAt = time.Unix(createdAt, 0).UTC()
 	t.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 	if lastRunAt.Valid {
@@ -908,6 +912,13 @@ func (s *SQLite) GetTask(ctx context.Context, id string) (*Task, error) {
 
 func (s *SQLite) DeleteTask(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, id)
+	return err
+}
+
+// SetTaskRunNow 置位/清除任务「立即运行」标记（POST /run 置位，收到执行报告后清除）。
+func (s *SQLite) SetTaskRunNow(ctx context.Context, taskID string, runNow bool) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE tasks SET run_now = ?, updated_at = ? WHERE id = ?`,
+		enabledInt(runNow), time.Now().Unix(), taskID)
 	return err
 }
 
@@ -1094,6 +1105,7 @@ func (s *SQLite) Cleanup(ctx context.Context, retention time.Duration) (int64, e
 		`DELETE FROM disk_metrics WHERE ts < ?`,
 		`DELETE FROM container_metrics WHERE ts < ?`,
 		`DELETE FROM alert_events WHERE started_at < ?`,
+		`DELETE FROM task_runs WHERE started_at < ?`,
 	} {
 		res, err := s.db.ExecContext(ctx, q, cutoff)
 		if err != nil {

@@ -178,6 +178,7 @@ export const api = {
   createTask: (b: SaveTaskBody) => post<Task>('/api/tasks', b),
   updateTask: (id: string, b: SaveTaskBody) => put<Task>(`/api/tasks/${encodeURIComponent(id)}`, b),
   deleteTask: (id: string) => del<{ status: string }>(`/api/tasks/${encodeURIComponent(id)}`),
+  runTask: (id: string) => post<Task>(`/api/tasks/${encodeURIComponent(id)}/run`),
   taskRuns: (id: string, limit?: number) =>
     get<TaskRun[]>(`/api/tasks/${encodeURIComponent(id)}/runs${qs({ limit })}`),
   agentPlugins: (agentId: string) => get<AgentPlugin[]>(`/api/agents/${encodeURIComponent(agentId)}/plugins`),

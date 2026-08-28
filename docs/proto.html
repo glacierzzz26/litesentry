@@ -179,6 +179,10 @@
             <ul>
               
                 <li>
+                  <a href="#litesentry.Chunk"><span class="badge">M</span>Chunk</a>
+                </li>
+              
+                <li>
                   <a href="#litesentry.ContainerMem"><span class="badge">M</span>ContainerMem</a>
                 </li>
               
@@ -187,7 +191,19 @@
                 </li>
               
                 <li>
+                  <a href="#litesentry.DesiredState"><span class="badge">M</span>DesiredState</a>
+                </li>
+              
+                <li>
                   <a href="#litesentry.Disk"><span class="badge">M</span>Disk</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.FrpStatus"><span class="badge">M</span>FrpStatus</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.FrpTunnelStatus"><span class="badge">M</span>FrpTunnelStatus</a>
                 </li>
               
                 <li>
@@ -211,7 +227,23 @@
                 </li>
               
                 <li>
+                  <a href="#litesentry.PluginRequest"><span class="badge">M</span>PluginRequest</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.PluginSpec"><span class="badge">M</span>PluginSpec</a>
+                </li>
+              
+                <li>
                   <a href="#litesentry.PushAck"><span class="badge">M</span>PushAck</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.RegisterReply"><span class="badge">M</span>RegisterReply</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.RegisterRequest"><span class="badge">M</span>RegisterRequest</a>
                 </li>
               
                 <li>
@@ -224,6 +256,14 @@
               
                 <li>
                   <a href="#litesentry.Series.TagsEntry"><span class="badge">M</span>Series.TagsEntry</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.TaskRunReport"><span class="badge">M</span>TaskRunReport</a>
+                </li>
+              
+                <li>
+                  <a href="#litesentry.TaskSpec"><span class="badge">M</span>TaskSpec</a>
                 </li>
               
               
@@ -247,6 +287,51 @@
       </div>
       <p>litesentry 数据契约（唯一 proto 源）</p><p>阶段一：Agent 定时上报主机 + 容器指标。</p><p>- 通信走 IPv4，Agent 通过 gRPC metadata 携带 token（证书 TLS/mTLS 预留，</p><p>测试阶段明文联调，上线前启用）。</p><p>- Series 通用字段已预留，阶段二插件化直接启用。</p>
 
+      
+        <h3 id="litesentry.Chunk">Chunk</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>data</td>
+                  <td><a href="#bytes">bytes</a></td>
+                  <td></td>
+                  <td><p>二进制分块 </p></td>
+                </tr>
+              
+                <tr>
+                  <td>sha256</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>完整二进制 SHA-256（末尾分块携带，用于校验） </p></td>
+                </tr>
+              
+                <tr>
+                  <td>size</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p>完整二进制字节数（末尾分块携带） </p></td>
+                </tr>
+              
+                <tr>
+                  <td>error</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>错误时返回 </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
       
         <h3 id="litesentry.ContainerMem">ContainerMem</h3>
         <p>容器内存（usage/limit，区别于主机的 total/used）</p>
@@ -359,6 +444,58 @@
 
         
       
+        <h3 id="litesentry.DesiredState">DesiredState</h3>
+        <p>心跳响应下发的期望状态：Agent 发现 state_version != 已应用版本时重新应用。</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>state_version</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p>全局递增，任一配置变更联动 &#43;1 </p></td>
+                </tr>
+              
+                <tr>
+                  <td>frp_toml</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>本机要运行的 frp 配置（frps 或 frpc），空串 = 不管理 </p></td>
+                </tr>
+              
+                <tr>
+                  <td>frp_enabled</td>
+                  <td><a href="#bool">bool</a></td>
+                  <td></td>
+                  <td><p>是否启用 frp 进程管理 </p></td>
+                </tr>
+              
+                <tr>
+                  <td>plugins</td>
+                  <td><a href="#litesentry.PluginSpec">PluginSpec</a></td>
+                  <td>repeated</td>
+                  <td><p>manifest 期望版本 </p></td>
+                </tr>
+              
+                <tr>
+                  <td>tasks</td>
+                  <td><a href="#litesentry.TaskSpec">TaskSpec</a></td>
+                  <td>repeated</td>
+                  <td><p>本机定时任务定义 </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
         <h3 id="litesentry.Disk">Disk</h3>
         <p></p>
 
@@ -392,6 +529,110 @@
               
                 <tr>
                   <td>used</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="litesentry.FrpStatus">FrpStatus</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>running</td>
+                  <td><a href="#bool">bool</a></td>
+                  <td></td>
+                  <td><p>frp 进程是否存活 </p></td>
+                </tr>
+              
+                <tr>
+                  <td>frp_version</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>error</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>未安装 / 启动失败等原因 </p></td>
+                </tr>
+              
+                <tr>
+                  <td>tunnels</td>
+                  <td><a href="#litesentry.FrpTunnelStatus">FrpTunnelStatus</a></td>
+                  <td>repeated</td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="litesentry.FrpTunnelStatus">FrpTunnelStatus</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>name</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>type</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>tcp | udp | http | https | stcp ... </p></td>
+                </tr>
+              
+                <tr>
+                  <td>status</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>online | offline | error </p></td>
+                </tr>
+              
+                <tr>
+                  <td>err</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>rx_bytes</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>tx_bytes</td>
                   <td><a href="#uint64">uint64</a></td>
                   <td></td>
                   <td><p> </p></td>
@@ -503,6 +744,22 @@
                   <td><a href="#litesentry.IPAddr">IPAddr</a></td>
                   <td>repeated</td>
                   <td><p>IPv4 &#43; IPv6 全量地址 </p></td>
+                </tr>
+              
+                <tr>
+                  <td>agent_cpu_pct</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>Agent 自身进程占用（读 /proc/self；用于监控采集端自身开销）
+
+自身进程周期 CPU 占用（%） </p></td>
+                </tr>
+              
+                <tr>
+                  <td>agent_mem_rss</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p>自身 RSS（字节） </p></td>
                 </tr>
               
             </tbody>
@@ -630,7 +887,21 @@
                   <td>series</td>
                   <td><a href="#litesentry.Series">Series</a></td>
                   <td>repeated</td>
-                  <td><p>阶段二启用，阶段一不填充 </p></td>
+                  <td><p>插件统一输出（阶段二启用） </p></td>
+                </tr>
+              
+                <tr>
+                  <td>frp</td>
+                  <td><a href="#litesentry.FrpStatus">FrpStatus</a></td>
+                  <td></td>
+                  <td><p>本机 frp 隧道状态（阶段二） </p></td>
+                </tr>
+              
+                <tr>
+                  <td>task_runs</td>
+                  <td><a href="#litesentry.TaskRunReport">TaskRunReport</a></td>
+                  <td>repeated</td>
+                  <td><p>定时任务执行结果（阶段二） </p></td>
                 </tr>
               
             </tbody>
@@ -671,6 +942,75 @@
 
         
       
+        <h3 id="litesentry.PluginRequest">PluginRequest</h3>
+        <p>拉插件二进制请求 / 流式分块。</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>plugin_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>version</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="litesentry.PluginSpec">PluginSpec</h3>
+        <p>插件期望清单（manifest）：Server 指派本机应运行的插件与版本。</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>plugin_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>version</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>args_json</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>插件参数（JSON 字符串） </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
         <h3 id="litesentry.PushAck">PushAck</h3>
         <p></p>
 
@@ -695,6 +1035,103 @@
                   <td><p> </p></td>
                 </tr>
               
+                <tr>
+                  <td>desired_state</td>
+                  <td><a href="#litesentry.DesiredState">DesiredState</a></td>
+                  <td></td>
+                  <td><p>心跳驱动下发：frp 配置 &#43; 插件 manifest &#43; 任务定义 </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="litesentry.RegisterReply">RegisterReply</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>agent_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Server 分配：已注册过则复用历史 id，否则新建 UUID </p></td>
+                </tr>
+              
+                <tr>
+                  <td>server_time</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="litesentry.RegisterRequest">RegisterRequest</h3>
+        <p>节点注册请求：携带机器自身信息，由 Server 分发 / 复用 agent_id。</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>hostname</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>machine_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>机器指纹（Linux /etc/machine-id；缺省回退 hostname） </p></td>
+                </tr>
+              
+                <tr>
+                  <td>os</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>arch</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>kernel</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>version</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Agent 构建版本（CARGO_PKG_VERSION） </p></td>
+                </tr>
+              
             </tbody>
           </table>
 
@@ -716,21 +1153,21 @@
                   <td>name</td>
                   <td><a href="#string">string</a></td>
                   <td></td>
-                  <td><p>e.g. &#34;postgres.connections&#34; </p></td>
+                  <td><p>e.g. &#34;host.cpu&#34; </p></td>
                 </tr>
               
                 <tr>
                   <td>tags</td>
                   <td><a href="#litesentry.Series.TagsEntry">Series.TagsEntry</a></td>
                   <td>repeated</td>
-                  <td><p>维度: instance, db... </p></td>
+                  <td><p>维度: agent_id, mount, container_id... </p></td>
                 </tr>
               
                 <tr>
                   <td>fields</td>
                   <td><a href="#litesentry.Series.FieldsEntry">Series.FieldsEntry</a></td>
                   <td>repeated</td>
-                  <td><p>指标: active=12 </p></td>
+                  <td><p>指标: pct=12.3 </p></td>
                 </tr>
               
                 <tr>
@@ -809,6 +1246,124 @@
 
         
       
+        <h3 id="litesentry.TaskRunReport">TaskRunReport</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>task_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>started_at</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>finished_at</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>status</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>ok | failed | timeout | skipped </p></td>
+                </tr>
+              
+                <tr>
+                  <td>exit_code</td>
+                  <td><a href="#int32">int32</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>output</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>stdout/stderr 截断尾部 </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="litesentry.TaskSpec">TaskSpec</h3>
+        <p>定时任务定义：由目标 agent 本地 cron 触发执行。</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>task_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>cron</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>标准 5 段 cron </p></td>
+                </tr>
+              
+                <tr>
+                  <td>plugin_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>args_json</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>timeout_s</td>
+                  <td><a href="#uint32">uint32</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>run_now</td>
+                  <td><a href="#bool">bool</a></td>
+                  <td></td>
+                  <td><p>立即运行标记：Server 置位，agent 下个心跳立即执行一次，收到报告后 Server 清除 </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
 
       
 
@@ -824,17 +1379,31 @@
           <tbody>
             
               <tr>
+                <td>Register</td>
+                <td><a href="#litesentry.RegisterRequest">RegisterRequest</a></td>
+                <td><a href="#litesentry.RegisterReply">RegisterReply</a></td>
+                <td><p>节点注册：Agent 启动时用自身机器信息换取（或复用）agent_id</p></td>
+              </tr>
+            
+              <tr>
                 <td>Push</td>
                 <td><a href="#litesentry.MetricsBatch">MetricsBatch</a></td>
                 <td><a href="#litesentry.PushAck">PushAck</a></td>
-                <td><p>常规定时上报（10s/批）</p></td>
+                <td><p>常规定时上报（默认 60s/批，即心跳）；响应携带 DesiredState 下发配置</p></td>
+              </tr>
+            
+              <tr>
+                <td>FetchPlugin</td>
+                <td><a href="#litesentry.PluginRequest">PluginRequest</a></td>
+                <td><a href="#litesentry.Chunk">Chunk</a> stream</td>
+                <td><p>拉插件二进制（流式分块）：Agent 在 DesiredState 发现缺/旧时主动调用</p></td>
               </tr>
             
               <tr>
                 <td>Stream</td>
                 <td><a href="#litesentry.MetricsBatch">MetricsBatch</a> stream</td>
                 <td><a href="#litesentry.PushAck">PushAck</a> stream</td>
-                <td><p>可选：长连接流式，实时性要求高时启用（阶段二插件分发复用此通道）</p></td>
+                <td><p>可选：长连接流式，实时性要求高时启用（预留）</p></td>
               </tr>
             
           </tbody>

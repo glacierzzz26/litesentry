@@ -1381,6 +1381,64 @@
                 }
             }
         },
+        "/tasks/{id}/run": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "置位 run_now → 目标 agent 下个心跳立即执行一次（结果照常落运行历史）；任务须已启用，\n执行报告到达后 Server 自动清除标记（agent 恢复纯 cron 调度）",
+                "tags": [
+                    "定时任务"
+                ],
+                "summary": "立即运行任务",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "任务 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/store.Task"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/tasks/{id}/runs": {
             "get": {
                 "security": [
@@ -1886,6 +1944,10 @@
                 "plugin_id": {
                     "type": "string"
                 },
+                "run_now": {
+                    "description": "立即运行标记：POST /run 置位，agent 执行报告到达后回清",
+                    "type": "boolean"
+                },
                 "target_agent_id": {
                     "description": "空 = 公网机（server 同机 agent）",
                     "type": "string"
@@ -2350,6 +2412,59 @@
                     "type": "integer"
                 },
                 "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "store.Task": {
+            "type": "object",
+            "properties": {
+                "args_json": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "cron": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "last_output_tail": {
+                    "type": "string"
+                },
+                "last_run_at": {
+                    "type": "string"
+                },
+                "last_status": {
+                    "description": "ok | failed | timeout | skipped",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "plugin_id": {
+                    "type": "string"
+                },
+                "run_now": {
+                    "description": "立即运行标记：POST /run 置位，agent 下心跳执行一次后 Server 清除",
+                    "type": "boolean"
+                },
+                "target_agent_id": {
+                    "description": "空 = 公网机（server 同机 agent）",
+                    "type": "string"
+                },
+                "timeout_s": {
+                    "type": "integer"
+                },
+                "updated_at": {
                     "type": "string"
                 }
             }

@@ -725,6 +725,7 @@ type TaskSpec struct {
 	PluginId      string                 `protobuf:"bytes,3,opt,name=plugin_id,json=pluginId,proto3" json:"plugin_id,omitempty"`
 	ArgsJson      string                 `protobuf:"bytes,4,opt,name=args_json,json=argsJson,proto3" json:"args_json,omitempty"`
 	TimeoutS      uint32                 `protobuf:"varint,5,opt,name=timeout_s,json=timeoutS,proto3" json:"timeout_s,omitempty"`
+	RunNow        bool                   `protobuf:"varint,6,opt,name=run_now,json=runNow,proto3" json:"run_now,omitempty"` // 立即运行标记：Server 置位，agent 下个心跳立即执行一次，收到报告后 Server 清除
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -792,6 +793,13 @@ func (x *TaskSpec) GetTimeoutS() uint32 {
 		return x.TimeoutS
 	}
 	return 0
+}
+
+func (x *TaskSpec) GetRunNow() bool {
+	if x != nil {
+		return x.RunNow
+	}
+	return false
 }
 
 // 心跳响应下发的期望状态：Agent 发现 state_version != 已应用版本时重新应用。
@@ -1584,13 +1592,14 @@ const file_litesentry_proto_rawDesc = "" +
 	"PluginSpec\x12\x1b\n" +
 	"\tplugin_id\x18\x01 \x01(\tR\bpluginId\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1b\n" +
-	"\targs_json\x18\x03 \x01(\tR\bargsJson\"\x8e\x01\n" +
+	"\targs_json\x18\x03 \x01(\tR\bargsJson\"\xa7\x01\n" +
 	"\bTaskSpec\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x12\n" +
 	"\x04cron\x18\x02 \x01(\tR\x04cron\x12\x1b\n" +
 	"\tplugin_id\x18\x03 \x01(\tR\bpluginId\x12\x1b\n" +
 	"\targs_json\x18\x04 \x01(\tR\bargsJson\x12\x1b\n" +
-	"\ttimeout_s\x18\x05 \x01(\rR\btimeoutS\"\xcd\x01\n" +
+	"\ttimeout_s\x18\x05 \x01(\rR\btimeoutS\x12\x17\n" +
+	"\arun_now\x18\x06 \x01(\bR\x06runNow\"\xcd\x01\n" +
 	"\fDesiredState\x12#\n" +
 	"\rstate_version\x18\x01 \x01(\x04R\fstateVersion\x12\x19\n" +
 	"\bfrp_toml\x18\x02 \x01(\tR\afrpToml\x12\x1f\n" +

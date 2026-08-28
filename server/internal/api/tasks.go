@@ -40,6 +40,7 @@ type taskView struct {
 	ArgsJSON        string     `json:"args_json"`
 	TimeoutS        uint32     `json:"timeout_s"`
 	Enabled         bool       `json:"enabled"`
+	RunNow          bool       `json:"run_now"` // 立即运行标记：POST /run 置位，agent 执行报告到达后回清
 	LastRunAt       *time.Time `json:"last_run_at,omitempty"`
 	LastStatus      string     `json:"last_status"` // ok | failed | timeout | skipped
 	LastOutputTail  string     `json:"last_output_tail"`
@@ -146,6 +147,7 @@ func (s *Server) taskViewOf(ctx context.Context, t *store.Task, hosts map[string
 		ArgsJSON:        t.ArgsJSON,
 		TimeoutS:        t.TimeoutS,
 		Enabled:         t.Enabled,
+		RunNow:          t.RunNow,
 		LastRunAt:       t.LastRunAt,
 		LastStatus:      t.LastStatus,
 		LastOutputTail:  t.LastOutputTail,
@@ -296,6 +298,41 @@ func (s *Server) deleteTask(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// runTask 立即运行一次定时任务（手动触发，不等待 cron）。
+// @Summary     立即运行任务
+// @Description 置位 run_now → 目标 agent 下个心跳立即执行一次（结果照常落运行历史）；任务须已启用，
+// @Description 执行报告到达后 Server 自动清除标记（agent 恢复纯 cron 调度）
+// @Tags        定时任务
+// @Param       id path string true "任务 ID"
+// @Success     200 {object} store.Task
+// @Failure     400 {object} map[string]string
+// @Failure     401 {object} map[string]string
+// @Failure     404 {object} map[string]string
+// @Security    BearerAuth
+// @Router      /tasks/{id}/run [post]
+func (s *Server) runTask(c *gin.Context) {
+	ctx := c.Request.Context()
+	t, err := s.st.GetTask(ctx, c.Param("id"))
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "任务不存在"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if !t.Enabled {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "任务已停用，请先启用"})
+		return
+	}
+	if err := s.st.SetTaskRunNow(ctx, t.ID, true); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	t.RunNow = true
+	c.JSON(http.StatusOK, s.taskViewOf(ctx, t, s.agentHosts(ctx)))
 }
 
 // taskRuns 某任务的运行历史（审计，append-only）。
