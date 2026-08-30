@@ -1,6 +1,6 @@
 [package]
 name = "litesentry-agent"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "litesentry 轻量监控 Agent（Rust）：主机 + 容器采集，gRPC 上报"
 

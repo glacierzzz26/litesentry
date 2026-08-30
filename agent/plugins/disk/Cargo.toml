@@ -1,6 +1,6 @@
 [package]
 name = "litesentry-disk-plugin"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "litesentry 内置插件：磁盘占用采集（sysinfo Disks）"
 
