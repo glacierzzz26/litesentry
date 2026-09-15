@@ -17,6 +17,8 @@ pub struct Config {
     pub id_file: String,
     /// 上报间隔（秒），即心跳周期
     pub interval_secs: u64,
+    /// 采集间隔（秒），下发给采集插件；缺省回落 interval_secs（心跳=采集）
+    pub collect_secs: u64,
     /// 插件缓存目录（下载的插件二进制按 plugin_id/version 存放，0700）
     pub plugin_dir: String,
     /// frp 二进制目录（LS_FRP_DIR，默认 /usr/local/bin）：frpc / frps 预装于此
@@ -52,6 +54,11 @@ impl Config {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(60);
+        // 采集间隔：独立于心跳（心跳可以 60s，采集 300s）；未设则与心跳相同（向后兼容）。
+        let collect_secs: u64 = std::env::var("LS_COLLECT_INTERVAL")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(interval_secs);
 
         Config {
             server: std::env::var("LS_SERVER").unwrap_or_else(|_| "127.0.0.1:9000".into()),
@@ -60,6 +67,7 @@ impl Config {
             id_file: std::env::var("LS_ID_FILE")
                 .unwrap_or_else(|_| "/var/lib/litesentry/agent_id".into()),
             interval_secs,
+            collect_secs,
             plugin_dir: std::env::var("LS_PLUGIN_DIR")
                 .unwrap_or_else(|_| "/var/lib/litesentry/plugins".into()),
             frp_dir: std::env::var("LS_FRP_DIR").unwrap_or_else(|_| "/usr/local/bin".into()),

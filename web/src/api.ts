@@ -7,13 +7,16 @@ import type {
   AgentPlugin,
   AlertEvent,
   AlertRule,
+  AssignPluginBody,
   ContainerSample,
   DiskSample,
   FrpConfigView,
   HostSample,
   LoginResult,
   Overview,
+  Plugin,
   SaveFrpBody,
+  SavePluginBody,
   SaveTaskBody,
   SettingsBody,
   SettingsView,
@@ -74,7 +77,9 @@ function qs(params: Record<string, string | number | undefined>): string {
 /** 请求统一封装：注入 JWT、解析 {error}、401 自动登出、网络错误中文化。 */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  if (init.method === 'POST' || init.method === 'PUT' || init.body) {
+  // FormData（插件上传）由浏览器自带 multipart boundary，绝不能设 Content-Type。
+  const isForm = init.body instanceof FormData;
+  if (!isForm && (init.method === 'POST' || init.method === 'PUT' || init.body)) {
     headers.set('Content-Type', 'application/json');
   }
   const token = getToken();
@@ -182,6 +187,26 @@ export const api = {
   taskRuns: (id: string, limit?: number) =>
     get<TaskRun[]>(`/api/tasks/${encodeURIComponent(id)}/runs${qs({ limit })}`),
   agentPlugins: (agentId: string) => get<AgentPlugin[]>(`/api/agents/${encodeURIComponent(agentId)}/plugins`),
+
+  // ---- 插件仓库（阶段二）----
+  plugins: () => get<Plugin[]>('/api/plugins'),
+  pluginDetail: (id: string) => get<Plugin[]>(`/api/plugins/${encodeURIComponent(id)}`),
+  // 上传 multipart：不经 request()（后者强制 JSON Content-Type），单独走 fetch 但复用鉴权/错误处理。
+  uploadPlugin: (file: File, b: SavePluginBody): Promise<Plugin> => {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('id', b.id);
+    fd.append('name', b.name);
+    fd.append('version', b.version);
+    if (b.args_schema) fd.append('args_schema', b.args_schema);
+    return request<Plugin>('/api/plugins', { method: 'POST', body: fd });
+  },
+  deletePluginVersion: (id: string, version: string) =>
+    del<{ status: string }>(`/api/plugins/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
+  assignPlugin: (pluginId: string, b: AssignPluginBody) =>
+    post<{ status: string }>(`/api/plugins/${encodeURIComponent(pluginId)}/assign`, b),
+  unassignPlugin: (agentId: string, pluginId: string) =>
+    del<{ status: string }>(`/api/agents/${encodeURIComponent(agentId)}/plugins/${encodeURIComponent(pluginId)}`),
 };
 
 // 类型再导出，页面层直接从 api 引用也行
@@ -190,13 +215,16 @@ export type {
   AgentPlugin,
   AlertEvent,
   AlertRule,
+  AssignPluginBody,
   ContainerSample,
   DiskSample,
   FrpConfigView,
   HostSample,
   LoginResult,
   Overview,
+  Plugin,
   SaveFrpBody,
+  SavePluginBody,
   SaveTaskBody,
   SettingsBody,
   SettingsView,

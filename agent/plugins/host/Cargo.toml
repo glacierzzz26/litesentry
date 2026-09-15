@@ -1,6 +1,6 @@
 [package]
 name = "litesentry-host-plugin"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "litesentry 内置插件：主机指标采集（sysinfo + get_if_addrs）"
 

@@ -185,3 +185,49 @@ func (s *Server) assignPlugin(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
+
+// deletePluginVersion 删除某插件版本。仍被节点指派时拒绝（须先取消指派），避免节点指向不存在的发布物。
+// @Summary     删除插件版本
+// @Description 删除不可变插件版本；若仍被任一节点指派则返回 409，须先取消指派
+// @Tags        插件
+// @Produce     json
+// @Param       id path string true "插件标识"
+// @Param       version path string true "版本号"
+// @Success     200 {object} map[string]string
+// @Failure     409 {object} map[string]string "仍被节点指派"
+// @Security    BearerAuth
+// @Router      /plugins/{id}/versions/{version} [delete]
+func (s *Server) deletePluginVersion(c *gin.Context) {
+	id := c.Param("id")
+	version := c.Param("version")
+	ctx := c.Request.Context()
+	if _, err := s.st.GetPlugin(ctx, id, version); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "插件版本不存在"})
+		return
+	}
+	if err := s.st.DeletePluginVersion(ctx, id, version); err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// unassignPlugin 取消某节点上某插件的指派（从 manifest 移除，节点下个心跳停止该插件）。
+// @Summary     取消插件指派
+// @Description 从指定 agent 的 manifest 移除某插件指派
+// @Tags        插件
+// @Produce     json
+// @Param       id path string true "agent_id"
+// @Param       pluginId path string true "插件标识"
+// @Success     200 {object} map[string]string
+// @Security    BearerAuth
+// @Router      /agents/{id}/plugins/{pluginId} [delete]
+func (s *Server) unassignPlugin(c *gin.Context) {
+	agentID := c.Param("id")
+	pluginID := c.Param("pluginId")
+	if err := s.st.UnassignPlugin(c.Request.Context(), agentID, pluginID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}

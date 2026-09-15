@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react';
 import { App as AntApp, ConfigProvider, Tooltip } from 'antd';
 import {
+  ApiOutlined,
   AppstoreOutlined,
   ControlOutlined,
   DeploymentUnitOutlined,
@@ -28,6 +29,7 @@ import Settings from './pages/Settings';
 import AlertRules from './pages/AlertRules';
 import Frp from './pages/Frp';
 import Tasks from './pages/Tasks';
+import Plugins from './pages/Plugins';
 // v2 新建页面
 import Overview from './pages/Overview';
 import Hosts from './pages/Hosts';
@@ -44,6 +46,7 @@ const MENU = [
   { key: '/alerts/rules', icon: <ControlOutlined />, label: '告警规则' },
   { key: '/frp', icon: <LinkOutlined />, label: 'FRP 隧道' },
   { key: '/tasks', icon: <ScheduleOutlined />, label: '定时任务' },
+  { key: '/plugins', icon: <ApiOutlined />, label: '插件' },
   { key: '/settings', icon: <SettingOutlined />, label: '设置' },
 ] as const;
 
@@ -56,6 +59,7 @@ function menuKey(route: string[]): string {
   if (r === 'alerts') return route[1] === 'rules' ? '/alerts/rules' : '/alerts';
   if (r === 'frp') return '/frp';
   if (r === 'tasks') return '/tasks';
+  if (r === 'plugins') return '/plugins';
   if (r === 'settings') return '/settings';
   return '/';
 }
@@ -69,6 +73,7 @@ function pageTitle(route: string[]): string {
   if (r === 'alerts') return route[1] === 'rules' ? '告警规则' : '告警事件';
   if (r === 'frp') return 'FRP 隧道';
   if (r === 'tasks') return '定时任务';
+  if (r === 'plugins') return '插件';
   if (r === 'settings') return '设置';
   return '总览';
 }
@@ -146,6 +151,8 @@ export default function App() {
     page = <Frp />;
   } else if (route[0] === 'tasks') {
     page = <Tasks />;
+  } else if (route[0] === 'plugins') {
+    page = <Plugins />;
   } else if (route[0] === 'settings') {
     page = <Settings />;
   } else {

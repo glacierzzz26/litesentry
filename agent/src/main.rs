@@ -73,9 +73,14 @@ async fn main() -> Result<()> {
     } else {
         cfg.agent_id.clone()
     };
-    tracing::info!("agent {agent_id} → {} (interval {}s, 心跳=上报)", cfg.server, cfg.interval_secs);
+    tracing::info!(
+        "agent {agent_id} → {} (心跳 {}s, 采集 {}s)",
+        cfg.server,
+        cfg.interval_secs,
+        cfg.collect_secs
+    );
 
-    let mut host = plugin::PluginHost::new(&cfg.plugin_dir, cfg.interval_secs);
+    let mut host = plugin::PluginHost::new(&cfg.plugin_dir, cfg.collect_secs);
     // S2：拉起内置采集插件（host/docker/disk），always-on
     host.start_builtins(&mut client, &cfg.token).await;
 

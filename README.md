@@ -70,7 +70,8 @@ journalctl -u litesentry-agent -f   # 采集日志
 | `LS_TOKEN` | 空 | Bearer token |
 | `LS_AGENT_ID` | 自动生成 | 手动指定节点标识 |
 | `LS_ID_FILE` | `/var/lib/litesentry/agent_id` | agent_id 持久化文件 |
-| `LS_INTERVAL` | `60` | 采集上报间隔（秒），即心跳周期 |
+| `LS_INTERVAL` | `60` | 心跳周期（秒），即上报/下发节拍 |
+| `LS_COLLECT_INTERVAL` | 同 `LS_INTERVAL` | 采集间隔（秒），下发给采集插件；与心跳解耦（可心跳 60s、采集 300s） |
 | `LS_TLS_CA` | 空 | mTLS：CA 证书 PEM（Agent 校验 Server 身份） |
 | `LS_TLS_CERT` | 空 | mTLS：Agent 客户端证书 PEM |
 | `LS_TLS_KEY` | 空 | mTLS：Agent 客户端私钥 PEM（600 权限） |

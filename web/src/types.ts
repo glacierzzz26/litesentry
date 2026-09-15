@@ -259,3 +259,32 @@ export interface AgentPlugin {
   version: string;
   args_json: string;
 }
+
+// ---- 插件仓库（阶段二）----
+
+/** 插件仓库条目（不可变版本；同 id 可并存多版本）。 */
+export interface Plugin {
+  id: string; // 插件标识（稳定跨版本）
+  name: string; // 展示名
+  kind: string; // 阶段二仅 binary
+  version: string;
+  sha256: string;
+  size: number; // 字节
+  args_schema?: string; // 参数说明（JSON）
+  created_at: string;
+}
+
+/** 插件上传体（multipart）。 */
+export interface SavePluginBody {
+  id: string;
+  name: string;
+  version: string;
+  args_schema?: string;
+}
+
+/** 插件指派体（agent_id 为内部标识，前端展示主机名）。 */
+export interface AssignPluginBody {
+  agent_id: string;
+  version: string;
+  args_json?: string;
+}

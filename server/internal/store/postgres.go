@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -135,11 +136,11 @@ CREATE INDEX IF NOT EXISTS idx_events_state  ON alert_events (state, started_at)
 -- ============ 阶段二：插件 / 任务 / frp ============
 
 CREATE TABLE IF NOT EXISTS plugins (
-  id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'binary',
+  id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'binary',
   version TEXT NOT NULL, sha256 TEXT NOT NULL, size BIGINT NOT NULL DEFAULT 0,
   args_schema TEXT DEFAULT '', data BYTEA NOT NULL,
   created_at BIGINT NOT NULL,
-  UNIQUE (id, version)
+  PRIMARY KEY (id, version)            -- 不可变版本：同 id 可并存多版本，只允许新增
 );
 CREATE TABLE IF NOT EXISTS agent_plugins (
   agent_id TEXT NOT NULL, plugin_id TEXT NOT NULL, version TEXT NOT NULL,
@@ -151,6 +152,7 @@ CREATE TABLE IF NOT EXISTS series (
   tags TEXT NOT NULL DEFAULT '{}', fields TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_series_agent_name_ts ON series (agent_id, name, ts);
+CREATE INDEX IF NOT EXISTS idx_series_ts ON series (ts);
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT '',
   target_agent_id TEXT DEFAULT '', cron TEXT NOT NULL, plugin_id TEXT NOT NULL,
@@ -201,7 +203,36 @@ func (p *Postgres) migrate() error {
 		return err
 	}
 	_, err := p.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_machine ON agents (machine_id)`)
-	return err
+	if err != nil {
+		return err
+	}
+	return p.migratePluginsPK()
+}
+
+// migratePluginsPK 把 plugins 主键从 id 单列迁移到 (id, version) 复合（让同 id 可存多版本）。
+// 幂等：仅当现主键列数为 1 时重建约束（旧库升级路径）。
+func (p *Postgres) migratePluginsPK() error {
+	var ncols int
+	err := p.db.QueryRow(`
+SELECT array_length(conkey, 1)
+FROM pg_constraint
+WHERE conrelid = 'plugins'::regclass AND contype = 'p'`).Scan(&ncols)
+	if err != nil {
+		return nil // 无主键记录时跳过（新库已由 pgSchema 建好复合主键）
+	}
+	if ncols > 1 {
+		return nil // 已是复合主键
+	}
+	stmts := []string{
+		`ALTER TABLE plugins DROP CONSTRAINT plugins_pkey`,
+		`ALTER TABLE plugins ADD PRIMARY KEY (id, version)`,
+	}
+	for _, q := range stmts {
+		if _, err := p.db.Exec(q); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *Postgres) UpsertAgent(ctx context.Context, a *Agent) error {
@@ -215,6 +246,12 @@ ON CONFLICT (agent_id) DO UPDATE SET
   ipv4=EXCLUDED.ipv4, ipv6=EXCLUDED.ipv6, last_seen=EXCLUDED.last_seen`,
 		a.AgentID, a.Hostname, a.OS, a.Arch, a.Kernel,
 		string(ipv4), string(ipv6), a.LastSeen.Unix(), a.CreatedAt.Unix())
+	return err
+}
+
+func (p *Postgres) TouchAgentLastSeen(ctx context.Context, agentID string, ts time.Time) error {
+	_, err := p.db.ExecContext(ctx,
+		`UPDATE agents SET last_seen = $1 WHERE agent_id = $2`, ts.Unix(), agentID)
 	return err
 }
 
@@ -765,6 +802,25 @@ ON CONFLICT (agent_id, plugin_id) DO UPDATE SET
 	return err
 }
 
+func (p *Postgres) DeletePluginVersion(ctx context.Context, id, version string) error {
+	var n int
+	if err := p.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM agent_plugins WHERE plugin_id = $1 AND version = $2`, id, version).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return fmt.Errorf("该版本仍被 %d 个节点指派，请先取消指派", n)
+	}
+	_, err := p.db.ExecContext(ctx, `DELETE FROM plugins WHERE id = $1 AND version = $2`, id, version)
+	return err
+}
+
+func (p *Postgres) UnassignPlugin(ctx context.Context, agentID, pluginID string) error {
+	_, err := p.db.ExecContext(ctx,
+		`DELETE FROM agent_plugins WHERE agent_id = $1 AND plugin_id = $2`, agentID, pluginID)
+	return err
+}
+
 func (p *Postgres) AgentPlugins(ctx context.Context, agentID string) ([]*AgentPlugin, error) {
 	rows, err := p.db.QueryContext(ctx, `
 SELECT agent_id, plugin_id, version, args_json
@@ -1039,6 +1095,7 @@ func (p *Postgres) Cleanup(ctx context.Context, retention time.Duration) (int64,
 		`DELETE FROM host_metrics WHERE ts < $1`,
 		`DELETE FROM disk_metrics WHERE ts < $1`,
 		`DELETE FROM container_metrics WHERE ts < $1`,
+		`DELETE FROM series WHERE ts < $1`,
 		`DELETE FROM alert_events WHERE started_at < $1`,
 		`DELETE FROM task_runs WHERE started_at < $1`,
 	} {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	_ "modernc.org/sqlite" // 纯 Go SQLite 驱动（无 cgo，交叉编译友好）
@@ -142,11 +143,11 @@ CREATE INDEX IF NOT EXISTS idx_events_state  ON alert_events (state, started_at)
 -- ============ 阶段二：插件 / 任务 / frp ============
 
 CREATE TABLE IF NOT EXISTS plugins (
-  id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'binary',
+  id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'binary',
   version TEXT NOT NULL, sha256 TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0,
   args_schema TEXT DEFAULT '', data BLOB NOT NULL,
   created_at INTEGER NOT NULL,
-  UNIQUE(id, version)                  -- 不可变版本，只允许新增
+  PRIMARY KEY (id, version)            -- 不可变版本：同 id 可并存多版本，只允许新增
 );
 CREATE TABLE IF NOT EXISTS agent_plugins (
   agent_id TEXT NOT NULL, plugin_id TEXT NOT NULL, version TEXT NOT NULL,
@@ -160,6 +161,7 @@ CREATE TABLE IF NOT EXISTS series (
   tags TEXT NOT NULL DEFAULT '{}', fields TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_series_agent_name_ts ON series (agent_id, name, ts);
+CREATE INDEX IF NOT EXISTS idx_series_ts ON series (ts);
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT '',
   target_agent_id TEXT DEFAULT '', cron TEXT NOT NULL, plugin_id TEXT NOT NULL,
@@ -216,8 +218,66 @@ func (s *SQLite) migrate() error {
 		return err
 	}
 	// 迁移完确保机器指纹唯一索引存在（partial：仅索引非 NULL 行）
-	_, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_machine ON agents (machine_id) WHERE machine_id IS NOT NULL`)
-	return err
+	if _, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_machine ON agents (machine_id) WHERE machine_id IS NOT NULL`); err != nil {
+		return err
+	}
+	// 迁移：plugins 旧 schema 为 id 单列主键（无法存同 id 多版本）。SQLite 不支持改主键，
+	// 需重建表。检测 version 列是否参与主键（PRAGMA table_info 的 pk 序号 > 0）。
+	if err := s.migratePluginsPK(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// migratePluginsPK 把 plugins 表从 id 单列主键迁移到 (id, version) 复合主键。
+// 幂等：新库已是复合主键则跳过；旧库重建表并保留原有行。
+func (s *SQLite) migratePluginsPK() error {
+	pk, err := s.columnPK("plugins", "version")
+	if err != nil {
+		return err
+	}
+	if pk > 0 {
+		return nil // 已是复合主键（或表刚建好）
+	}
+	stmts := []string{
+		`CREATE TABLE plugins_migrated (
+  id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'binary',
+  version TEXT NOT NULL, sha256 TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0,
+  args_schema TEXT DEFAULT '', data BLOB NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (id, version)
+)`,
+		`INSERT INTO plugins_migrated (id, name, kind, version, sha256, size, args_schema, data, created_at)
+ SELECT id, name, kind, version, sha256, size, args_schema, data, created_at FROM plugins`,
+		`DROP TABLE plugins`,
+		`ALTER TABLE plugins_migrated RENAME TO plugins`,
+	}
+	for _, q := range stmts {
+		if _, err := s.db.Exec(q); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *SQLite) columnPK(table, col string) (int, error) {
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, typ string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return 0, err
+		}
+		if name == col {
+			return pk, nil
+		}
+	}
+	return 0, rows.Err()
 }
 
 func (s *SQLite) hasColumn(table, col string) (bool, error) {
@@ -254,6 +314,12 @@ ON CONFLICT(agent_id) DO UPDATE SET
 `,
 		a.AgentID, a.Hostname, a.OS, a.Arch, a.Kernel,
 		string(ipv4), string(ipv6), now, created)
+	return err
+}
+
+func (s *SQLite) TouchAgentLastSeen(ctx context.Context, agentID string, ts time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE agents SET last_seen = ? WHERE agent_id = ?`, ts.Unix(), agentID)
 	return err
 }
 
@@ -799,6 +865,25 @@ ON CONFLICT(agent_id, plugin_id) DO UPDATE SET
 	return err
 }
 
+func (s *SQLite) DeletePluginVersion(ctx context.Context, id, version string) error {
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM agent_plugins WHERE plugin_id = ? AND version = ?`, id, version).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return fmt.Errorf("该版本仍被 %d 个节点指派，请先取消指派", n)
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM plugins WHERE id = ? AND version = ?`, id, version)
+	return err
+}
+
+func (s *SQLite) UnassignPlugin(ctx context.Context, agentID, pluginID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM agent_plugins WHERE agent_id = ? AND plugin_id = ?`, agentID, pluginID)
+	return err
+}
+
 func (s *SQLite) AgentPlugins(ctx context.Context, agentID string) ([]*AgentPlugin, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT agent_id, plugin_id, version, args_json
@@ -1104,6 +1189,7 @@ func (s *SQLite) Cleanup(ctx context.Context, retention time.Duration) (int64, e
 		`DELETE FROM host_metrics WHERE ts < ?`,
 		`DELETE FROM disk_metrics WHERE ts < ?`,
 		`DELETE FROM container_metrics WHERE ts < ?`,
+		`DELETE FROM series WHERE ts < ?`,
 		`DELETE FROM alert_events WHERE started_at < ?`,
 		`DELETE FROM task_runs WHERE started_at < ?`,
 	} {

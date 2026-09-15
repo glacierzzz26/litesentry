@@ -12,7 +12,8 @@
 #   LS_TLS_CERT=/etc/litesentry/agent.crt
 #   LS_TLS_KEY=/etc/litesentry/agent.key
 #   LS_ID_FILE=/var/lib/litesentry/agent_id
-#   LS_INTERVAL=60
+#   LS_INTERVAL=60            # 心跳周期（秒）
+#   LS_COLLECT_INTERVAL=300   # 采集间隔（秒），缺省同 LS_INTERVAL
 
 [Unit]
 Description=litesentry Agent（主机/容器监控采集）

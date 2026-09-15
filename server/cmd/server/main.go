@@ -43,7 +43,7 @@ import (
 )
 
 //	@title          litesentry API
-//	@version        0.2.0
+//	@version        0.3.0
 //	@description    轻量主机 + 容器监控 Server REST 接口（前端面板取数）。Agent↔Server 走 gRPC，契约见 docs/proto.html。
 //	@termsOfService http://localhost:8080/
 

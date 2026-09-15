@@ -252,6 +252,9 @@ type Store interface {
 	RegisterAgent(ctx context.Context, machineID string, a *Agent) (agentID string, isNew bool, err error)
 	// UpsertAgent 注册/更新节点最新状态（含 IPv4/IPv6 地址快照）。
 	UpsertAgent(ctx context.Context, a *Agent) error
+	// TouchAgentLastSeen 仅刷新节点最近心跳时间（不覆盖元信息）。
+	// 用于采集与心跳解耦后：无 series 的空心跳也须刷新在线态，避免节点误判离线。
+	TouchAgentLastSeen(ctx context.Context, agentID string, ts time.Time) error
 	// AppendBatch 将一批（主机 + 磁盘 + 容器）时序样本写入，单事务。
 	AppendBatch(ctx context.Context, h *HostSample, disks []*DiskSample, containers []*ContainerSample) error
 	// QueryHost 查询某节点一段窗口内的主机样本。
@@ -304,11 +307,15 @@ type Store interface {
 	// ListPlugins 返回全部插件（不含二进制内容，Data 为空）。GetPlugin 返回元信息 + 二进制。
 	ListPlugins(ctx context.Context) ([]*Plugin, error)
 	GetPlugin(ctx context.Context, id, version string) (*Plugin, error)
+	// DeletePluginVersion 删除某插件版本；若仍被任一 agent 指派则报错（须先取消指派）。
+	DeletePluginVersion(ctx context.Context, id, version string) error
 
 	// ---- 插件指派（manifest 来源）----
 	// AssignPlugin 指派插件到某 agent（覆盖同插件旧指派）。AgentPlugins 列出该 agent 的 manifest。
 	AssignPlugin(ctx context.Context, ap *AgentPlugin) error
 	AgentPlugins(ctx context.Context, agentID string) ([]*AgentPlugin, error)
+	// UnassignPlugin 取消某 agent 上某插件的指派。
+	UnassignPlugin(ctx context.Context, agentID, pluginID string) error
 
 	// ---- 插件 Series（阶段二）----
 	// AppendSeries 将一批插件产出的通用时序写入 series 表（单事务）。

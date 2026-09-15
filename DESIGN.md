@@ -55,7 +55,7 @@
 | 运行时 | `tokio` | 常驻内存压到 5~10MB |
 
 > 编译目标：Rust 单静态二进制 ≈ 5~8MB，静态链接无 glibc 依赖，一键拷到任何 Linux 机器。
-> 上报间隔：`LS_INTERVAL` 默认 **60s**（即心跳周期）；网络速率用前后两采样差分得到 bps。
+> 上报间隔：`LS_INTERVAL` 默认 **60s**（即心跳周期）；采集间隔 `LS_COLLECT_INTERVAL` 独立（缺省=心跳），可心跳 60s / 采集 300s。网络速率用前后两采样差分得到 bps（间隔放宽后为区间均值）。
 
 ### Server（Go + Gin）
 
@@ -191,7 +191,7 @@ CREATE INDEX idx_events_state  ON alert_events (state, started_at);
 ### 写入与保留策略
 
 - **批量事务写入**：`AppendBatch` 单事务写入主机 + 磁盘 + 容器；Agent 默认 60s 一批，每节点 ~60 行/分，写入量很小
-- **保留策略**：默认保留 30 天（`--retention`），Server 每小时周期 `Cleanup` 删除超期时序 + 告警事件
+- **保留策略**：默认保留 30 天（`--retention`），Server 每小时周期 `Cleanup` 删除超期时序（`host_metrics` / `disk_metrics` / `container_metrics` / **`series`**）+ 告警事件 + `task_runs`。`series` 与三张旧表同口径裁剪（`idx_series_ts` 免全表扫）——早期遗漏导致 `series` 无界增长，已补
 - **PostgreSQL 进阶（可选）**：数据量大时 `PARTITION BY RANGE(ts)` 按月分区，或加 TimescaleDB 扩展；个人场景默认不需要
 
 ## gRPC 协议（proto）
@@ -481,9 +481,27 @@ rpc FetchPlugin(PluginRequest) returns (stream Chunk);   // 流式分块 + sha25
 
 **加固后 E2E 已验**：cron=`0 0 1 1 *`（明年到期，与 cron 触发可区分）+ `POST /api/tasks/:id/run` → 响应 `run_now=true` → agent 日志「任务 … 触发（立即运行）：hello@0.1.0」→ `task_runs` 新行 ok/exit 0 → 任务 `run_now` 自动回清 false；连点两次均立即执行（可重复）；停用任务 → POST /run 400「任务已停用，请先启用」；`* * * * *` 回归仍按分钟触发（日志无「立即运行」后缀）；保留裁剪经 store 单测（2h 前旧行被清、近期行保留）
 
+### 运行期加固已落地（心跳/采集解耦 + series 保留 + 插件管理）
+
+**动机**：生产排查发现 `series` 表**无保留裁剪**（不在 `Cleanup()` 列表）且生产 `LS_INTERVAL=10`——高频 + 不删叠加，15.9 天堆 261.9 万行 / DB 1.37GB 无界增长。同时两个设计缺口暴露：心跳与采集共用一个旋钮、插件管理只有后端。
+
+**① 心跳 / 采集解耦**：新增 `LS_COLLECT_INTERVAL`（agent `Config.collect_secs`，缺省回落 `interval_secs`，向后兼容）。`PluginHost::new` 吃 `collect_secs`（决定内置采集插件速度），push ticker 仍吃 `interval_secs`（心跳节拍）。生产目标 = 心跳 60s（缺省）+ 采集 300s。内置插件无需改动（各自按 start 命令 `interval` 睡眠）。**注意**：`net_*_bps`/`agent_cpu_pct` 是相邻采样差分，间隔放宽后语义变为"N 分钟均值"（重启首采样仍 0，属预期）。
+
+**② 空心跳刷新在线态（server，随 ① 必改）**：`UpsertAgent`（写 `last_seen`）仅在带 `host.info` series 时执行 → 采集 > 心跳时多数心跳无 series，`last_seen` 会停在上一采集点，节点在 `offlineAfter=5min` 阈值附近**误判离线**。新增 `TouchAgentLastSeen(agentID, ts)`（仅 UPDATE last_seen），persist 在 `agent==nil` 分支调用 → 每次心跳都刷新在线态。
+
+**③ series 保留裁剪**：`Cleanup()` DELETE 列表加 `DELETE FROM series WHERE ts < ?`（sqlite/pg 同构）+ `idx_series_ts`（原 `idx_series_agent_name_ts` 前导列是 agent_id，删除按 ts 过滤用不上）。`schema` 每次启动 `Exec`，`CREATE INDEX IF NOT EXISTS` 对既有库自动生效。store 单测 `TestCleanupPrunesSeries`。
+
+**④ 插件多版本 PK 修复**：`plugins` 旧 DDL 为 `id TEXT PRIMARY KEY` + `UNIQUE(id,version)` —— id 单列主键会**拒绝同 id 第二版本**（"插件有版本"实为坏的）。改为 `PRIMARY KEY (id, version)`。SQLite 不支持改主键 → `migratePluginsPK()` 检测 version 列是否参与主键（`PRAGMA table_info` 的 pk 序号），旧库重建表并保留行；PG 侧用 `pg_constraint` 查主键列数，单列则 DROP/ADD 约束。store 单测 `TestPluginMultiVersionAndDelete`（同 id 两版本并存 + 旧库迁移保留行）。
+
+**⑤ 插件删除 / 取消指派**：store 加 `DeletePluginVersion`（**被任一 agent 指派则拒删**，防 manifest 指向不存在发布物）、`UnassignPlugin`；REST 加 `DELETE /api/plugins/:id/versions/:version`、`DELETE /api/agents/:id/plugins/:pluginId`。
+
+**⑥ 前端插件管理页**：新建 `web/src/pages/Plugins.tsx`（按 id 分组列版本 / 上传 Modal（multipart）/ 指派 Modal / 删除版本 / 取消指派；已指派按**主机名**展示，agent_id 永不出现）+ `api.ts` 插件方法（`uploadPlugin` 走 FormData，`request()` 对 FormData 不设 Content-Type）+ `types.ts` `Plugin` 类型 + `App.tsx` 菜单/路由「插件」。
+
+**E2E 已验（本地，心跳 5s / 采集 15s 放大比例）**：日志 `心跳 5s, 采集 15s`；`series` 每 15s 落一批（37 行/批），`last_seen` 每 5s 刷新（空心跳也刷新——解耦前会停在 15s）；上传 `hello` 两个版本并存（PK 修复）；指派 → agent `FetchPlugin` 拉取并启动（缓存 dir + SHA 校验）；删被指派版本 409、未指派/取消指派后 200；任务「立即运行」端到端回归 ok/exit 0/回清。`go test ./...` 全绿。
+
 ## Server 数据模型（store 包新增表）
 
-`plugins`（id, name, kind, version, sha256, size, args_schema, created_at, UNIQUE(id,version)）·
+`plugins`（id, name, kind, version, sha256, size, args_schema, created_at, **PRIMARY KEY(id,version)**）·
 `tasks`（id, name, target_agent_id, cron, plugin_id, args_json, timeout_s, enabled, run_now, last_run_*, created_at, updated_at）·
 `task_runs`（id, task_id, agent_id, status, exit_code, output, started_at, finished_at）·
 `frp_configs`（kind, agent_id, server_addr, server_port, token, proxies JSON, state_version, enabled）·

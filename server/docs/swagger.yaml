@@ -537,7 +537,7 @@ info:
   description: 轻量主机 + 容器监控 Server REST 接口（前端面板取数）。Agent↔Server 走 gRPC，契约见 docs/proto.html。
   termsOfService: http://localhost:8080/
   title: litesentry API
-  version: 0.2.0
+  version: 0.3.0
 paths:
   /agents:
     get:
@@ -702,6 +702,34 @@ paths:
       summary: Agent 已指派插件
       tags:
       - 定时任务
+  /agents/{id}/plugins/{pluginId}:
+    delete:
+      description: 从指定 agent 的 manifest 移除某插件指派
+      parameters:
+      - description: agent_id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 插件标识
+        in: path
+        name: pluginId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 取消插件指派
+      tags:
+      - 插件
   /alerts/events:
     get:
       description: 按时间窗口查询，可按节点 / 状态过滤；默认最近 24h
@@ -1214,6 +1242,40 @@ paths:
       security:
       - BearerAuth: []
       summary: 指派插件
+      tags:
+      - 插件
+  /plugins/{id}/versions/{version}:
+    delete:
+      description: 删除不可变插件版本；若仍被任一节点指派则返回 409，须先取消指派
+      parameters:
+      - description: 插件标识
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 版本号
+        in: path
+        name: version
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: 仍被节点指派
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 删除插件版本
       tags:
       - 插件
   /settings:

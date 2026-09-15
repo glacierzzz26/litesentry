@@ -80,6 +80,7 @@ func (s *Server) Routes() *gin.Engine {
 		api.POST("/plugins", s.uploadPlugin)
 		api.GET("/plugins/:id", s.pluginDetail)
 		api.POST("/plugins/:id/assign", s.assignPlugin)
+		api.DELETE("/plugins/:id/versions/:version", s.deletePluginVersion)
 
 		api.GET("/frp", s.listFrp)
 		api.PUT("/frp/:kind/:agent_id", s.saveFrp)
@@ -92,6 +93,7 @@ func (s *Server) Routes() *gin.Engine {
 		api.POST("/tasks/:id/run", s.runTask)
 		api.GET("/tasks/:id/runs", s.taskRuns)
 		api.GET("/agents/:id/plugins", s.agentPlugins)
+		api.DELETE("/agents/:id/plugins/:pluginId", s.unassignPlugin)
 
 		api.GET("/alerts/rules", s.listRules)
 		api.POST("/alerts/rules", s.createRule)

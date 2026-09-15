@@ -1,6 +1,6 @@
 [package]
 name = "litesentry-docker-plugin"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "litesentry 内置插件：容器指标采集（bollard / Docker Engine API）"
 

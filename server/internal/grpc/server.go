@@ -333,6 +333,12 @@ func (s *Server) persist(ctx context.Context, batch *litesentrypb.MetricsBatch) 
 		if err := s.store.UpsertAgent(ctx, agent); err != nil {
 			return err
 		}
+	} else {
+		// 心跳与采集解耦：无 series 的空心跳（采集间隔 > 心跳间隔时出现）也须刷新
+		// last_seen，否则节点会在两次采集之间被误判离线。
+		if err := s.store.TouchAgentLastSeen(ctx, batch.GetAgentId(), ts); err != nil {
+			return err
+		}
 	}
 	if err := s.store.AppendBatch(ctx, hs, disks, containers); err != nil {
 		return err
