@@ -122,6 +122,7 @@ CREATE TABLE agents (
   os TEXT, arch TEXT, kernel TEXT,
   version    TEXT NOT NULL DEFAULT '',   -- Agent 构建版本（注册上报）
   machine_id TEXT,                       -- 机器指纹，注册复用；唯一索引（partial）
+  builtin_json TEXT NOT NULL DEFAULT '', -- 内置插件清单（注册上报：id/version/sha256 JSON）
   ipv4 TEXT NOT NULL DEFAULT '[]',
   ipv6 TEXT NOT NULL DEFAULT '[]',
   last_seen  INTEGER NOT NULL,           -- unix 秒
@@ -237,7 +238,11 @@ message Series { ... }        // 阶段二插件通用字段，阶段一预留�
 | GET | `/api/agents/:id/host` `…/containers` `…/disks` | 时序样本（`?from=&to=` unix 秒） |
 | GET/POST | `/api/alerts/rules` · PUT/DELETE `/api/alerts/rules/:id` | 告警规则 CRUD |
 | GET | `/api/alerts/events` | 告警事件（按节点/状态/时间窗口过滤） |
-| GET/PUT | `/api/settings` · POST `/api/settings/feishu-test` | 飞书机器人配置 / 发送测试 |
+| GET | `/api/plugins` | 插件仓库（全部版本元信息，不含二进制） |
+| GET | `/api/builtins` | 内置插件清单（聚合各节点注册上报的 host/docker/disk，按 id 分组；只读） |
+| GET | `/api/agents/:id/plugins` | 某节点已指派插件（`builtin` 标记内置；任务表单据此过滤） |
+| POST | `/api/plugins/:id/assign` | 指派插件版本到节点（`agent_id` 空串或 `server` → 公网机） |
+| GET/PUT | `/api/settings` · POST `/api/settings/feishu-test` | 飞书机器人配置 / 发送测试；`server_agent_id` 声明公网机（Server 同机 agent） |
 | GET/POST | `/api/users` · PUT/DELETE `/api/users/:id` | 用户管理（重置密码、删除守卫） |
 
 ## 告警引擎
@@ -379,6 +384,9 @@ message DesiredState {
 message PluginSpec { string plugin_id = 1; string version = 2; string args_json = 3; }
 message TaskSpec   { string task_id = 1; string cron = 2; string plugin_id = 3;
                      string args_json = 4; uint32 timeout_s = 5; }
+message BuiltinPlugin { string plugin_id = 1; string version = 2; string sha256 = 3; }
+// RegisterRequest 增加：repeated BuiltinPlugin builtins（随 agent 发布的内置插件清单，
+// Server 据此做默认兜底指派 + 插件页展示；单一真源为 agent/build.rs）
 rpc FetchPlugin(PluginRequest) returns (stream Chunk);   // 流式分块 + sha256
 // MetricsBatch 增加：series（插件统一输出）+ frp 状态 + task_runs 结果
 ```
@@ -388,6 +396,7 @@ rpc FetchPlugin(PluginRequest) returns (stream Chunk);   // 流式分块 + sha25
 ## 二进制插件协议（本轮落实，Lua 后置）
 
 - **插件 = 可执行二进制**，标识 `plugin_id:version`，不可变发布物（只允许新增版本）。SHA-256 校验和 + manifest 白名单（只运行指派清单内 `plugin_id:version`）
+- **内置插件（host/docker/disk）**：同样遵守本协议，但发布方式为**随 agent 旁路发布**（`<agent_exe>/plugins/`，`LS_BUILTIN_DIR` 覆盖），不经 `plugins` 表 / `FetchPlugin`（`ensure_binary` 命中内置清单且版本一致 → 本地 SHA-256 复核即用）。生命周期与外部插件一致：由 `agent_plugins` + DesiredState 驱动（见「内置插件并入插件体系已落地」）。**注意**：内置采集插件只实现 `start`（常驻），**未实现 `run`** → 任务表单已过滤，勿把 host/docker/disk 选作定时任务插件（会超时）
 - **分发**：心跳响应带 manifest 期望版本 → 缺/旧 → `FetchPlugin` 流式下载 → 校验 → 缓存（目录 0700，按 `plugin_id/version`）
 - **执行**：`tokio::process::Command` 子进程。输入 JSON-line：`{"cmd":"run","args":{...}}`（一次性，定时任务）/ `{"cmd":"start","args":{...},"interval":60}`（长驻，采集）。输出 JSON-line：每行 `{"ts":...,"series":[{name,tags,fields}]}`，映射 proto `Series`
 - **隔离**：进程级（崩溃/死循环不杀 agent）、超时强杀、stderr 截断、退出码回传
@@ -415,7 +424,7 @@ rpc FetchPlugin(PluginRequest) returns (stream Chunk);   // 流式分块 + sha25
 **决策落地**：
 
 - **D1 内置插件旁路发布**：3 个独立插件 crate（`agent/plugins/{host,docker,disk}`，release strip+lto），随 agent 放在 `<agent_exe>/plugins/`（`LS_BUILTIN_DIR` 覆盖）；**不内嵌** —— 内嵌会使 agent 涨到 ~10MB+ 突破单二进制 ≤10MB 硬约束（当前 agent 3.9MB，插件 host 660KB / docker 1.9MB / disk 438KB）
-- **D2 内置插件 always-on**：Agent 启动即拉起 host/docker/disk，不走 DesiredState（避免 Server 内置清单与 Agent 插件版本耦合 footgun）；外部插件（hello/自定义）白名单 + FetchPlugin 校验模型不变。内置插件信任继承自 agent 本体，运行时对 `<agent_exe>/plugins/` 下文件做 SHA-256 复核（build.rs 在构建期把插件二进制哈希 + 版本写入 agent 内置清单）
+- **D2 内置插件并入插件体系**（初版为 always-on，后经「内置插件并入」一节改为统一生命周期）：host/docker/disk 仍**不内嵌**、随 agent 旁路发布，但**不再 always-on** —— Server 按 agent 注册上报的内置清单做一次性默认指派，此后与外部插件走同一套 DesiredState 生命周期（取消指派即停用、指派更高版本即升级）。外部插件（hello/自定义）白名单 + FetchPlugin 校验模型不变。内置插件信任继承自 agent 本体，运行时对 `<agent_exe>/plugins/` 下文件做 SHA-256 复核（build.rs 在构建期把插件二进制哈希 + 版本写入 agent 内置清单）
 - **D3 Series 契约**（Server 翻译层 `server/internal/grpc/translate.go` 纯函数，改动需与插件同步）：
 
 | series | tags | fields | 翻译目标 |
@@ -498,6 +507,22 @@ rpc FetchPlugin(PluginRequest) returns (stream Chunk);   // 流式分块 + sha25
 **⑥ 前端插件管理页**：新建 `web/src/pages/Plugins.tsx`（按 id 分组列版本 / 上传 Modal（multipart）/ 指派 Modal / 删除版本 / 取消指派；已指派按**主机名**展示，agent_id 永不出现）+ `api.ts` 插件方法（`uploadPlugin` 走 FormData，`request()` 对 FormData 不设 Content-Type）+ `types.ts` `Plugin` 类型 + `App.tsx` 菜单/路由「插件」。
 
 **E2E 已验（本地，心跳 5s / 采集 15s 放大比例）**：日志 `心跳 5s, 采集 15s`；`series` 每 15s 落一批（37 行/批），`last_seen` 每 5s 刷新（空心跳也刷新——解耦前会停在 15s）；上传 `hello` 两个版本并存（PK 修复）；指派 → agent `FetchPlugin` 拉取并启动（缓存 dir + SHA 校验）；删被指派版本 409、未指派/取消指派后 200；任务「立即运行」端到端回归 ok/exit 0/回清。`go test ./...` 全绿。
+
+### 内置插件并入插件体系已落地（消除「云端看不到插件」断层）
+
+**动机**：内置采集插件（host/docker/disk）此前为 agent 侧 always-on 旁路，**不进 `plugins` 表、不进 `agent_plugins`、不进 DesiredState** → 插件管理页（只列 `plugins` 表）**永远看不到它们**，用户既无法确认采集插件在跑，也无法停用/升级。本次把内置插件并入 Server 插件体系，但保留其「随 agent 发布、不内嵌」的发布方式。
+
+**① 内置清单上报（agent → Server）**：proto `RegisterRequest` 新增 `repeated BuiltinPlugin builtins`（`plugin_id`/`version`/`sha256`）。agent 在 `builtin::manifest()`（读 build.rs 构建期清单）填入，注册时上报；Server 落 `agents.builtin_json`（sqlite/pg 加列，`RegisterAgent` 的 UPDATE/INSERT 双路径都写）。**单一真源仍是 `agent/build.rs`**，Server 不再硬编码内置清单。
+
+**② 默认兜底指派（Server 侧播种）**：`desiredState()` 先调 `seedBuiltinAssignments(agentID)`：若该节点上报了内置清单，且 `settings.builtin_seeded:<agent_id>` 标记未设，则把清单里每个 `plugin_id@version` 写进 `agent_plugins`，最后打标记。**只播种一次** —— 用户此后取消指派不会被重新塞回（保住「可完全停用」语义）。旧 agent 未上报清单 → 不播种**也不打标记**（升级重连后即可正常播种）。播种失败仅告警不阻断下发（agent 侧空清单仍有兜底）。
+
+**③ agent 侧去 always-on**：删 `PluginHost::start_builtins` 与 `builtin_ids` 跳过逻辑，host/docker/disk 与外部插件走**同一套** `apply()` 生命周期。**空清单兜底**：`desired.is_empty()` 时只**补齐缺失**的内置插件、不停止任何在跑进程（旧 Server / 下发异常时不至误停采集；「都停掉」语义依赖此前的非空清单）。`task.rs` 的插件版本解析改为「内置 manifest 兜底 + 指派 manifest **覆盖**」—— 指派版本才是权威（升级后的内置插件须按指派版本执行）。
+
+**④ 只读清单视图 + 前端**：REST `GET /api/builtins` 聚合各节点上报清单（按 `plugin_id` 分组版本 / `node_count` / 逐节点条目，**只以主机名呈现**）。前端 Plugins 页新增「内置插件」卡片（各节点上报版本 + sha256；未指派节点行内可「指派」——内置版本不在 `plugins` 表，按节点上报版本重新指派即恢复），版本行与已指派行加「内置」标。`GET /api/agents/:id/plugins` 增加 `builtin` 字段标记内置插件，任务表单据此**过滤**（内置采集插件只实现常驻 `start`，无一次性 `run` 分支，选了只会超时）。
+
+**⑤ 公网机哨兵一致性修复**：`assignPlugin` 原先只认路径哨兵 `server`，而前端指派表单发的是空串（`target==='server' ? '' : target`）→ 公网机指派一律被 `agent_id/version 不能为空` 400 挡掉。改为**空串与 `server` 同义**，均解析 `settings.server_agent_id`，与 `tasks.go`/`frp.go` 约定统一。同时补 **`server_agent_id` 的设置入口**：此前该设置项**全仓库只读、无任何写入点**（模型里 5 处读、0 处写），「公网机」概念实际无法配置 —— `PUT /api/settings` 新增可空 `server_agent_id` 字段（缺省=不修改 / 空串=清除 / 非空须为已注册节点，否则 400），前端「设置」页新增「公网机（Server 同机 Agent）」卡片（按主机名选择，值仍是 agent_id）。回归测试 `TestAssignPluginServerSentinel` / `TestPutSettingsServerAgentID`。
+
+**E2E 已验（本地真联调）**：agent 注册上报内置清单 → Server 落 `builtin_json` 并播种 3 条指派 → `GET /api/builtins` 返回 host/docker/disk@0.3.0（含 sha256、主机名）→ agent 日志 `已应用 DesiredState v…（3 个插件，0 个任务）`。`go test ./...` 全绿；`make docs` / `make proto-doc` 已随本次更新（新增 `/builtins` 路径、`BuiltinPlugin` 消息、`settingsView.server_agent_id`）。
 
 ## Server 数据模型（store 包新增表）
 

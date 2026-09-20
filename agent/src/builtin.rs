@@ -31,6 +31,15 @@ pub fn find(id: &str) -> Option<&'static BuiltinEntry> {
     BUILTIN_PLUGINS.iter().find(|e| e.id == id)
 }
 
+/// 内置插件清单（id, version, sha256）：注册时上报 Server，供其做「默认兜底指派」
+/// 与插件页展示。Server 不再硬编码内置清单，单一真源仍是 agent/build.rs。
+pub fn manifest() -> Vec<(&'static str, &'static str, &'static str)> {
+    BUILTIN_PLUGINS
+        .iter()
+        .map(|e| (e.id, e.version, e.sha256))
+        .collect()
+}
+
 /// 校验内置插件二进制存在、SHA-256 与构建期清单一致，并确保可执行；返回路径。
 #[cfg(unix)]
 pub fn verify(entry: &BuiltinEntry) -> Result<PathBuf, String> {

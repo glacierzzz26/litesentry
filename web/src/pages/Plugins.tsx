@@ -21,7 +21,7 @@ import {
 import type { UploadFile } from 'antd';
 import { InboxOutlined, PlusOutlined } from '@ant-design/icons';
 import { api } from '../api';
-import type { Agent, AgentPlugin, Plugin } from '../types';
+import type { Agent, AgentPlugin, BuiltinPluginGroup, Plugin } from '../types';
 import { fmtBytes } from '../format';
 
 /** 公网机（Server 同机 agent）哨兵：与后端 api/serverPathID 对齐。 */
@@ -41,10 +41,12 @@ function shortSha(s: string) {
 /** 单条插件版本行。 */
 function VersionRow({
   p,
+  isBuiltin,
   onAssign,
   onDelete,
 }: {
   p: Plugin;
+  isBuiltin: boolean; // 该 id 是否为内置插件（以各节点上报清单为准）
   onAssign: (p: Plugin) => void;
   onDelete: (p: Plugin) => void;
 }) {
@@ -54,6 +56,7 @@ function VersionRow({
       style={{ borderColor: 'var(--line)' }}
     >
       <Tag color="blue" className="num">{p.version}</Tag>
+      {isBuiltin && <Tag color="gold">内置</Tag>}
       <span className="num text-xs" style={{ color: 'var(--mut)' }}>{fmtBytes(p.size)}</span>
       <span className="num text-xs" style={{ color: 'var(--mut)' }} title={p.sha256}>
         sha256 {shortSha(p.sha256)}
@@ -61,10 +64,85 @@ function VersionRow({
       <span className="text-xs" style={{ color: 'var(--mut)' }}>{fmtTime(p.created_at)}</span>
       <div className="ml-auto flex items-center gap-2">
         <Button size="small" type="link" onClick={() => onAssign(p)}>指派</Button>
-        <Popconfirm title="删除该版本？若仍被节点指派将拒绝删除。" onConfirm={() => onDelete(p)}>
+        <Popconfirm
+          title={isBuiltin ? '删除该版本？内置插件随 agent 发布，删除本行不影响节点本地运行。' : '删除该版本？若仍被节点指派将拒绝删除。'}
+          onConfirm={() => onDelete(p)}
+        >
           <Button size="small" type="link" danger>删除</Button>
         </Popconfirm>
       </div>
+    </div>
+  );
+}
+
+/** 内置插件卡片：各节点上报的内置采集插件（host/docker/disk），Server 只读展示。
+ *  已取消指派的节点在此行内提供「指派」按钮 —— 内置版本不在插件仓库，
+ *  只能按节点上报的版本重新指派（可停用 / 可恢复的闭环）。 */
+function BuiltinCard({
+  groups,
+  assigned,
+  hostnameToAgentId,
+  onAssign,
+}: {
+  groups: BuiltinPluginGroup[];
+  assigned: Set<string>; // `${agent_id}/${plugin_id}` 已指派集合
+  hostnameToAgentId: Map<string, string>;
+  onAssign: (agentId: string, pluginId: string, version: string) => void;
+}) {
+  return (
+    <div className="card p-5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium" style={{ color: 'var(--fg)' }}>内置插件</span>
+        <Tag color="gold">随 agent 发布</Tag>
+        <span className="text-xs" style={{ color: 'var(--mut)' }}>
+          已自动指派到各节点（取消指派即停用）· 上传更高版本可升级，无需重新发版 agent
+        </span>
+      </div>
+      {groups.length === 0 ? (
+        <div className="mt-3 text-sm" style={{ color: 'var(--mut)' }}>
+          暂无节点上报（节点下次心跳注册后出现）。
+        </div>
+      ) : (
+        <div className="mt-3 space-y-3">
+          {groups.map((g) => (
+            <div key={g.plugin_id} className="border-t pt-3 text-sm" style={{ borderColor: 'var(--line)' }}>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="num font-medium" style={{ color: 'var(--fg)' }}>{g.plugin_id}</span>
+                {g.versions.map((v) => (
+                  <Tag key={v} color="blue" className="num">{v}</Tag>
+                ))}
+                <span className="text-xs" style={{ color: 'var(--mut)' }}>{g.node_count} 个节点</span>
+              </div>
+              <div className="mt-1.5 space-y-1">
+                {g.nodes.map((n) => {
+                  const agentId = hostnameToAgentId.get(n.hostname);
+                  const isAssigned = !!agentId && assigned.has(`${agentId}/${g.plugin_id}`);
+                  return (
+                    <div key={`${n.hostname}@${n.version}`} className="flex flex-wrap items-center gap-3 text-xs">
+                      <span className="num" style={{ color: 'var(--mut)' }}>
+                        {n.hostname}
+                        <span style={{ opacity: 0.7 }}> · {n.version} · sha {shortSha(n.sha256)}</span>
+                      </span>
+                      {isAssigned ? (
+                        <Tag color="green">已指派</Tag>
+                      ) : (
+                        <Button
+                          size="small"
+                          type="link"
+                          disabled={!agentId}
+                          onClick={() => agentId && onAssign(agentId, g.plugin_id, n.version)}
+                        >
+                          指派
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -74,6 +152,7 @@ export default function Plugins() {
   const [rows, setRows] = useState<Plugin[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [assigns, setAssigns] = useState<AgentPlugin[]>([]); // 全部节点的指派（前端扇出聚合）
+  const [builtins, setBuiltins] = useState<BuiltinPluginGroup[]>([]); // 各节点上报的内置插件清单
   const [loading, setLoading] = useState(false);
 
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -87,12 +166,16 @@ export default function Plugins() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [p, a] = await Promise.all([api.plugins(), api.agents()]);
+      const [p, a, b] = await Promise.all([api.plugins(), api.agents(), api.builtins().catch(() => [])]);
       setRows(p);
       setAgents(a);
-      // 扇出各节点已指派插件（无「全部指派」端点；节点数少，成本可忽略）
+      setBuiltins(b);
+      // 扇出各节点已指派插件（无「全部指派」端点；节点数少，成本可忽略）。
+      // 公网机（server 哨兵）的指派不在 agents 列表里，须单独拉——否则公网机内置插件
+      // 虽已播种指派却不出现在「已指派」，用户无从取消。
+      const targets = [SERVER_TARGET, ...a.map((ag) => ag.agent_id)];
       const per = await Promise.all(
-        a.map((ag) => api.agentPlugins(ag.agent_id).catch(() => [] as AgentPlugin[])),
+        targets.map((t) => api.agentPlugins(t).catch(() => [] as AgentPlugin[])),
       );
       setAssigns(per.flat());
     } catch {
@@ -199,12 +282,29 @@ export default function Plugins() {
     groups.set(p.id, g);
   }
 
+  // 内置插件 id 集合（以各节点上报清单为准）：版本行与已指派行据此标注。
+  const builtinIds = new Set(builtins.map((g) => g.plugin_id));
+  // 已指派集合（内置卡片行内「指派/已指派」判定）与主机名→agent_id 反查（卡片只拿到主机名）。
+  const assignedKeys = new Set(assigns.map((ap) => `${ap.agent_id}/${ap.plugin_id}`));
+  const hostnameToAgentId = new Map(agents.map((a) => [a.hostname, a.agent_id]));
+
+  // 重新指派内置插件（取消指派后恢复）：版本取节点上报值，Server 侧以内置清单校验。
+  const assignBuiltin = async (agentId: string, pluginId: string, version: string) => {
+    try {
+      await api.assignPlugin(pluginId, { agent_id: agentId, version, args_json: '' });
+      message.success('已指派，节点下个心跳恢复该内置插件');
+      load();
+    } catch (e) {
+      message.error(String(e).replace(/^Error:\s*/, ''));
+    }
+  };
+
   const targetOptions = [
     { value: SERVER_TARGET, label: '公网机（Server 同机）' },
     ...agents.map((a) => ({ value: a.agent_id, label: a.hostname })),
   ];
 
-  if (loading && rows.length === 0 && assigns.length === 0) {
+  if (loading && rows.length === 0 && assigns.length === 0 && builtins.length === 0) {
     return <div className="card p-4"><Skeleton active paragraph={{ rows: 6 }} /></div>;
   }
 
@@ -217,6 +317,14 @@ export default function Plugins() {
         <Button type="primary" icon={<PlusOutlined />} onClick={openUpload}>上传插件</Button>
       </div>
 
+      {/* 内置插件：随 agent 发布，Server 只读聚合各节点上报清单 */}
+      <BuiltinCard
+        groups={builtins}
+        assigned={assignedKeys}
+        hostnameToAgentId={hostnameToAgentId}
+        onAssign={assignBuiltin}
+      />
+
       {/* 已指派：按节点展示（主机名，不显示 agent_id） */}
       <div className="card p-5">
         <div className="mb-3 text-sm font-medium" style={{ color: 'var(--fg)' }}>已指派</div>
@@ -228,6 +336,7 @@ export default function Plugins() {
               <div key={`${ap.agent_id}/${ap.plugin_id}`} className="flex flex-wrap items-center gap-3 text-sm">
                 <Tag color="blue">{hostnameOf(ap.agent_id)}</Tag>
                 <span className="num">{ap.plugin_id}@{ap.version}</span>
+                {builtinIds.has(ap.plugin_id) && <Tag color="gold">内置</Tag>}
                 {ap.args_json && (
                   <span className="num text-xs" style={{ color: 'var(--mut)' }} title={ap.args_json}>{ap.args_json}</span>
                 )}
@@ -255,7 +364,7 @@ export default function Plugins() {
             </div>
             <div className="mt-2">
               {versions.map((p) => (
-                <VersionRow key={p.version} p={p} onAssign={openAssign} onDelete={remove} />
+                <VersionRow key={p.version} p={p} isBuiltin={builtinIds.has(id)} onAssign={openAssign} onDelete={remove} />
               ))}
             </div>
           </div>

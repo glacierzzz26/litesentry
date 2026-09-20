@@ -14,6 +14,11 @@
 #   LS_ID_FILE=/var/lib/litesentry/agent_id
 #   LS_INTERVAL=60            # 心跳周期（秒）
 #   LS_COLLECT_INTERVAL=300   # 采集间隔（秒），缺省同 LS_INTERVAL
+#
+# 内置采集插件（host/docker/disk）：随 agent 二进制旁路发布，默认取
+#   <agent_exe>/plugins/（即 /usr/local/bin/plugins/）。
+#   **升级 agent 时须同步更新该目录下的插件二进制**（否则 build.rs 写入的
+#   SHA-256 与文件不符，内置插件会被拒绝启动并告警）；如需换目录用 LS_BUILTIN_DIR。
 
 [Unit]
 Description=litesentry Agent（主机/容器监控采集）

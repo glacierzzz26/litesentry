@@ -6,6 +6,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -30,8 +31,42 @@ type Agent struct {
 	IPv6      []IPAddr  `json:"ipv6"`
 	LastSeen  time.Time `json:"last_seen"`
 	CreatedAt time.Time `json:"created_at"`
+	// BuiltinJSON 是本机上报的内置插件清单（JSON 数组，id/version/sha256），注册时写入。
+	// Server 据此做「默认兜底指派」与插件页展示，不再硬编码内置清单。旧 agent 为空串。
+	BuiltinJSON string `json:"-"`
 	// Status 由 API 层计算（服务端权威）：online | offline，预留 upgrading 等扩展状态。
 	Status string `json:"status"`
+}
+
+// BuiltinPlugin 内置插件清单条目（agent 注册上报：随 agent 发布的内置插件）。
+type BuiltinPlugin struct {
+	PluginID string `json:"plugin_id"`
+	Version  string `json:"version"`
+	SHA256   string `json:"sha256"`
+}
+
+// EncodeBuiltinManifest 把内置插件清单编码成落库 JSON（空清单 → 空串，便于旧库判空）。
+func EncodeBuiltinManifest(items []BuiltinPlugin) string {
+	if len(items) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(items)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// DecodeBuiltinManifest 解码落库的内置清单 JSON；空/损坏一律视为「无上报」（不阻断注册）。
+func DecodeBuiltinManifest(raw string) []BuiltinPlugin {
+	if raw == "" {
+		return nil
+	}
+	var items []BuiltinPlugin
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return nil
+	}
+	return items
 }
 
 // HostSample 主机时序样本
@@ -250,6 +285,8 @@ type Store interface {
 	// RegisterAgent 按机器指纹注册：已注册过则复用其 agent_id，否则新建 UUID。
 	// 返回 agent_id 与是否新建。
 	RegisterAgent(ctx context.Context, machineID string, a *Agent) (agentID string, isNew bool, err error)
+	// BuiltinManifest 读取某节点上报的内置插件清单（注册时写入；旧 agent 返回空切片）。
+	BuiltinManifest(ctx context.Context, agentID string) ([]BuiltinPlugin, error)
 	// UpsertAgent 注册/更新节点最新状态（含 IPv4/IPv6 地址快照）。
 	UpsertAgent(ctx context.Context, a *Agent) error
 	// TouchAgentLastSeen 仅刷新节点最近心跳时间（不覆盖元信息）。

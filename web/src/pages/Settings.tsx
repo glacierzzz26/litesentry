@@ -2,12 +2,12 @@
 // 用户表格沿用主机/容器页的 antd Table 样式（.card 包裹 + scroll + 首末列留白）。
 
 import { useCallback, useEffect, useState } from 'react';
-import { App, Button, Checkbox, Form, Input, Modal, Popconfirm, Space, Table, Tag, Tooltip } from 'antd';
+import { App, Button, Checkbox, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { api } from '../api';
 import { fmtDateTime } from '../format';
 import { useStore } from '../store';
-import type { SettingsView, User } from '../types';
+import type { Agent, SettingsView, User } from '../types';
 
 export default function Settings() {
   const { message } = App.useApp();
@@ -15,6 +15,9 @@ export default function Settings() {
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const [sending, setSending] = useState(false);
   const [feishuForm] = Form.useForm();
+  const [serverForm] = Form.useForm();
+  // 公网机候选：节点列表。展示主机名（agent_id 不露给用户），值仍是 agent_id。
+  const [agents, setAgents] = useState<Agent[]>([]);
 
   // ---- 用户管理状态 ----
   const [users, setUsers] = useState<User[]>([]);
@@ -30,10 +33,19 @@ export default function Settings() {
       const s = await api.settings();
       setSettings(s);
       feishuForm.setFieldsValue({ webhook: s.feishu_webhook, secret: '', clearSecret: false });
+      serverForm.setFieldsValue({ agent_id: s.server_agent_id || undefined });
     } catch {
       /* mock 模式静默 */
     }
-  }, [feishuForm]);
+  }, [feishuForm, serverForm]);
+
+  const loadAgents = useCallback(async () => {
+    try {
+      setAgents(await api.agents());
+    } catch {
+      /* mock 模式静默 */
+    }
+  }, []);
 
   const loadUsers = useCallback(async () => {
     setUsersLoading(true);
@@ -49,7 +61,8 @@ export default function Settings() {
   useEffect(() => {
     loadSettings();
     loadUsers();
-  }, [loadSettings, loadUsers]);
+    loadAgents();
+  }, [loadSettings, loadUsers, loadAgents]);
 
   // ---- 用户管理 ----
   const create = async () => {
@@ -186,6 +199,21 @@ export default function Settings() {
     }
   };
 
+  const saveServerAgent = async () => {
+    const v = await serverForm.validateFields();
+    try {
+      // 只提交公网机字段：飞书改由各自表单负责，这里带上现值避免覆盖（后端 webhook 为全量写）。
+      const res = await api.saveSettings({
+        feishu_webhook: settings?.feishu_webhook ?? '',
+        server_agent_id: (v.agent_id as string) ?? '',
+      });
+      setSettings(res);
+      message.success(v.agent_id ? '公网机已设置' : '公网机声明已清除');
+    } catch (e) {
+      message.error(String(e).replace(/^Error:\s*/, ''));
+    }
+  };
+
   const test = async () => {
     setSending(true);
     try {
@@ -251,6 +279,29 @@ export default function Settings() {
         <p className="mt-4 text-xs" style={{ color: 'var(--faint)' }}>
           ℹ️ 测试阶段 webhook 与 secret 明文存于服务端数据库（不写入日志）；上线前需加密存储并启用 TLS/mTLS。
         </p>
+      </section>
+
+      {/* 公网机（Server 同机 Agent）：frps 归属 / 任务目标 / 内置插件指派都依赖它 */}
+      <section className="card p-5">
+        <h3 className="mb-1 text-sm font-semibold" style={{ color: 'var(--fg)' }}>公网机（Server 同机 Agent）</h3>
+        <p className="mb-4 text-xs" style={{ color: 'var(--mut)' }}>
+          声明哪台节点就是 Server 本机 —— frps 归属、任务「公网机」目标、内置插件指派都按它解析。
+          未声明时这些功能会提示「未设置公网机 Agent」。
+        </p>
+        <Form form={serverForm} layout="vertical" style={{ maxWidth: 560 }}>
+          <Form.Item
+            name="agent_id"
+            label="节点"
+            extra={settings?.server_agent_id ? '已设置。留空并保存 = 清除声明。' : '未设置 —— 请在下面选择 Server 所在节点。'}
+          >
+            <Select
+              allowClear
+              placeholder="选择 Server 所在节点（按主机名）"
+              options={agents.map((a) => ({ value: a.agent_id, label: a.hostname || '未知节点' }))}
+            />
+          </Form.Item>
+          <Button type="primary" onClick={saveServerAgent}>保存</Button>
+        </Form>
       </section>
 
       {/* 新建用户 */}

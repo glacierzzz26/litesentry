@@ -89,16 +89,20 @@ impl TaskRunner {
 
     /// 应用 DesiredState 的任务/插件清单（state_version 门内调用，幂等）。
     ///
-    /// - 插件版本表 = 指派 manifest（ds.plugins）+ 内置 manifest（内置恒可用，D3）
+    /// - 插件版本表 = 内置 manifest 兜底 + 指派 manifest **覆盖**：内置插件并入 Server
+    ///   插件体系后，「指派版本」才是权威（升级后的 host/docker/disk 需按指派版本执行），
+    ///   内置 manifest 仅在未指派时兜底（旧 Server / 空清单）。
     /// - 任务集整体重建：同内容重算 next_fire 与旧值一致（cron 确定性）
     /// - cron 解析失败的任务跳过调度（Server 侧已有轻量校验拦截明显非法）
     pub fn apply(&mut self, tasks: &[TaskSpec], plugins: &[PluginSpec]) {
         let mut plugin_versions: HashMap<String, String> = HashMap::new();
-        for p in plugins {
-            plugin_versions.insert(p.plugin_id.clone(), p.version.clone());
-        }
+        // 1) 内置 manifest 兜底
         for b in crate::builtin::BUILTIN_PLUGINS {
             plugin_versions.insert(b.id.to_string(), b.version.to_string());
+        }
+        // 2) 指派 manifest 覆盖（含内置插件的升级版本）
+        for p in plugins {
+            plugin_versions.insert(p.plugin_id.clone(), p.version.clone());
         }
         self.plugins = plugin_versions;
 

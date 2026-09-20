@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS agents (
   kernel     TEXT NOT NULL DEFAULT '',
   version    TEXT NOT NULL DEFAULT '',  -- Agent 构建版本（注册上报）
   machine_id TEXT,               -- 机器指纹（注册复用）
+  builtin_json TEXT NOT NULL DEFAULT '',  -- 内置插件清单（注册上报：id/version/sha256）
   ipv4       TEXT NOT NULL DEFAULT '[]',
   ipv6       TEXT NOT NULL DEFAULT '[]',
   last_seen  BIGINT NOT NULL,
@@ -192,6 +193,7 @@ func (p *Postgres) migrate() error {
 		`ALTER TABLE host_metrics ADD COLUMN IF NOT EXISTS agent_mem_rss BIGINT`,
 		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS machine_id TEXT`,
 		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS version TEXT`,
+		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS builtin_json TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS run_now BOOLEAN NOT NULL DEFAULT FALSE`,
 	} {
 		if _, err := p.db.Exec(q); err != nil {
@@ -263,19 +265,33 @@ func (p *Postgres) RegisterAgent(ctx context.Context, machineID string, a *Agent
 	case err == nil:
 		// 复用历史 agent_id：同步更新元信息与在线时间
 		_, uerr := p.db.ExecContext(ctx, `
-UPDATE agents SET hostname=$1, os=$2, arch=$3, kernel=$4, version=$5, last_seen=$6
-WHERE agent_id=$7`,
-			a.Hostname, a.OS, a.Arch, a.Kernel, a.Version, a.LastSeen.Unix(), existing)
+UPDATE agents SET hostname=$1, os=$2, arch=$3, kernel=$4, version=$5, builtin_json=$6, last_seen=$7
+WHERE agent_id=$8`,
+			a.Hostname, a.OS, a.Arch, a.Kernel, a.Version, a.BuiltinJSON, a.LastSeen.Unix(), existing)
 		return existing, false, uerr
 	case err != sql.ErrNoRows:
 		return "", false, err
 	}
 	id := newUUID()
 	_, err = p.db.ExecContext(ctx, `
-INSERT INTO agents (agent_id, hostname, os, arch, kernel, version, machine_id, last_seen, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		id, a.Hostname, a.OS, a.Arch, a.Kernel, a.Version, machineID, a.LastSeen.Unix(), a.CreatedAt.Unix())
+INSERT INTO agents (agent_id, hostname, os, arch, kernel, version, machine_id, builtin_json, last_seen, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		id, a.Hostname, a.OS, a.Arch, a.Kernel, a.Version, machineID, a.BuiltinJSON, a.LastSeen.Unix(), a.CreatedAt.Unix())
 	return id, true, err
+}
+
+// BuiltinManifest 读取节点上报的内置插件清单（JSON 解码；空/旧 agent → 空切片）。
+func (p *Postgres) BuiltinManifest(ctx context.Context, agentID string) ([]BuiltinPlugin, error) {
+	var raw string
+	err := p.db.QueryRowContext(ctx,
+		`SELECT COALESCE(builtin_json, '') FROM agents WHERE agent_id = $1`, agentID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return DecodeBuiltinManifest(raw), nil
 }
 
 func (p *Postgres) AppendBatch(ctx context.Context, h *HostSample, disks []*DiskSample, containers []*ContainerSample) error {
@@ -413,7 +429,7 @@ ORDER BY ts, mount`,
 
 func (p *Postgres) Agents(ctx context.Context) ([]*Agent, error) {
 	rows, err := p.db.QueryContext(ctx, `
-SELECT agent_id, hostname, os, arch, kernel, version, ipv4, ipv6, last_seen, created_at
+SELECT agent_id, hostname, os, arch, kernel, version, COALESCE(builtin_json,''), ipv4, ipv6, last_seen, created_at
 FROM agents ORDER BY hostname`)
 	if err != nil {
 		return nil, err
@@ -426,7 +442,7 @@ FROM agents ORDER BY hostname`)
 		var ipv4, ipv6 string
 		var lastSeen, createdAt int64
 		if err := rows.Scan(&a.AgentID, &a.Hostname, &a.OS, &a.Arch, &a.Kernel, &a.Version,
-			&ipv4, &ipv6, &lastSeen, &createdAt); err != nil {
+			&a.BuiltinJSON, &ipv4, &ipv6, &lastSeen, &createdAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(ipv4), &a.IPv4)

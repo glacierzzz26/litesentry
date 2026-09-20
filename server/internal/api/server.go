@@ -77,6 +77,7 @@ func (s *Server) Routes() *gin.Engine {
 		api.POST("/settings/feishu-test", s.feishuTest)
 
 		api.GET("/plugins", s.listPlugins)
+		api.GET("/builtins", s.listBuiltins)
 		api.POST("/plugins", s.uploadPlugin)
 		api.GET("/plugins/:id", s.pluginDetail)
 		api.POST("/plugins/:id/assign", s.assignPlugin)
@@ -275,21 +276,27 @@ func (s *Server) containerSeries(c *gin.Context) {
 // ---- 设置 ----
 
 // settingsView 设置视图：secret 只回传是否已设置，不泄漏原文。
+// ServerAgentID 是「公网机（Server 同机 agent）」的 agent_id，为 frps 归属 / 任务目标 /
+// 内置插件指派所依赖；未设置（未上报或未指定）时为空串，前端据此提示。
 type settingsView struct {
 	FeishuWebhook   string `json:"feishu_webhook"`
 	FeishuSecretSet bool   `json:"feishu_secret_set"`
+	ServerAgentID   string `json:"server_agent_id"`
 }
 
 // settingsBody 设置写入体（空 secret = 保留原值；feishu_secret_clear = 显式清除）。
+// ServerAgentID：nil = 不修改；指向空串 = 清除（与 feishu 的「空即保留」不同，
+// 因为「取消公网机声明」也是合法状态）。
 type settingsBody struct {
-	FeishuWebhook     string `json:"feishu_webhook"`
-	FeishuSecret      string `json:"feishu_secret"`
-	FeishuSecretClear bool   `json:"feishu_secret_clear"`
+	FeishuWebhook     string  `json:"feishu_webhook"`
+	FeishuSecret      string  `json:"feishu_secret"`
+	FeishuSecretClear bool    `json:"feishu_secret_clear"`
+	ServerAgentID     *string `json:"server_agent_id"`
 }
 
 // getSettings 读取设置。
 // @Summary     读取设置
-// @Description 飞书 webhook 与 secret 是否存在（secret 不回显明文）
+// @Description 飞书 webhook 与 secret 是否存在（secret 不回显明文）+ 公网机 agent_id
 // @Tags        设置
 // @Produce     json
 // @Success     200 {object} api.settingsView
@@ -304,16 +311,22 @@ func (s *Server) getSettings(c *gin.Context) {
 		return
 	}
 	secret, _ := s.st.GetSetting(ctx, "feishu_secret")
-	c.JSON(http.StatusOK, settingsView{FeishuWebhook: webhook, FeishuSecretSet: secret != ""})
+	serverID, _ := s.st.GetSetting(ctx, "server_agent_id")
+	c.JSON(http.StatusOK, settingsView{
+		FeishuWebhook:   webhook,
+		FeishuSecretSet: secret != "",
+		ServerAgentID:   serverID,
+	})
 }
 
 // putSettings 保存设置。
 // @Summary     保存设置
-// @Description 更新飞书 webhook；secret 为空表示保留原值
+// @Description 更新飞书 webhook（secret 为空保留原值）与公网机 agent_id（缺省字段 = 不修改）
 // @Tags        设置
 // @Accept      json
 // @Produce     json
 // @Success     200 {object} api.settingsView
+// @Failure     400 {object} map[string]string "公网机 agent_id 未注册"
 // @Failure     401 {object} map[string]string
 // @Security    BearerAuth
 // @Router      /settings [put]
@@ -346,7 +359,37 @@ func (s *Server) putSettings(c *gin.Context) {
 			secretSet = true
 		}
 	}
-	c.JSON(http.StatusOK, settingsView{FeishuWebhook: body.FeishuWebhook, FeishuSecretSet: secretSet})
+
+	serverID, _ := s.st.GetSetting(ctx, "server_agent_id")
+	if body.ServerAgentID != nil {
+		next := *body.ServerAgentID
+		// 指向一个未注册的 agent_id 只会让 frps/任务/内置指派静默失效，故先校验存在性；
+		// 空串 = 显式取消公网机声明（合法）。
+		if next != "" {
+			agents, err := s.st.Agents(ctx)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			found := false
+			for _, a := range agents {
+				if a.AgentID == next {
+					found = true
+					break
+				}
+			}
+			if !found {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "公网机 agent_id 未注册: " + next})
+				return
+			}
+		}
+		if err := s.st.SetSetting(ctx, "server_agent_id", next); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		serverID = next
+	}
+	c.JSON(http.StatusOK, settingsView{FeishuWebhook: body.FeishuWebhook, FeishuSecretSet: secretSet, ServerAgentID: serverID})
 }
 
 // feishuTest 发送测试消息。
