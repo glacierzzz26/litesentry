@@ -24,6 +24,9 @@ pub struct RegisterInfo {
     pub arch: String,
     pub kernel: String,
     pub version: String,
+    /// 本机内置插件清单 (id, version, sha256)：随 agent 发布，由 build.rs 构建期生成。
+    /// 上报后 Server 可据此做默认兜底指派并在插件页展示。
+    pub builtins: Vec<(String, String, String)>,
 }
 
 pub struct Client {
@@ -57,6 +60,15 @@ impl Client {
 
     /// 注册：用自身机器信息换取（或复用）Server 分发的 agent_id。
     pub async fn register(&mut self, token: &str, info: &RegisterInfo) -> Result<String> {
+        let builtins = info
+            .builtins
+            .iter()
+            .map(|(id, version, sha256)| crate::pb::BuiltinPlugin {
+                plugin_id: id.clone(),
+                version: version.clone(),
+                sha256: sha256.clone(),
+            })
+            .collect();
         let mut req = Request::new(RegisterRequest {
             hostname: info.hostname.clone(),
             machine_id: info.machine_id.clone(),
@@ -64,6 +76,7 @@ impl Client {
             arch: info.arch.clone(),
             kernel: info.kernel.clone(),
             version: info.version.clone(),
+            builtins,
         });
         req.metadata_mut()
             .insert("authorization", MetadataValue::from_str(&format!("Bearer {token}"))?);

@@ -145,12 +145,16 @@ export interface LoginResult {
 export interface SettingsView {
   feishu_webhook: string;
   feishu_secret_set: boolean;
+  /** 公网机（Server 同机 agent）的 agent_id；未声明时为空串。前端不直接展示，仅用于选择器回填。 */
+  server_agent_id: string;
 }
 
 export interface SettingsBody {
   feishu_webhook: string;
   feishu_secret?: string;
   feishu_secret_clear?: boolean;
+  /** 缺省（undefined）= 不修改；空串 = 清除公网机声明。 */
+  server_agent_id?: string;
 }
 
 // ---- FRP 隧道 ----
@@ -258,6 +262,25 @@ export interface AgentPlugin {
   plugin_id: string;
   version: string;
   args_json: string;
+  /** 内置插件（随 agent 发布，如 host/docker/disk）：无一次性 run 分支，任务表单须过滤。 */
+  builtin?: boolean;
+}
+
+// ---- 内置插件（随 agent 发布，Server 只读聚合上报清单）----
+
+/** 单节点内置插件条目（节点以主机名呈现，agent_id 不回传）。 */
+export interface BuiltinNodeView {
+  hostname: string;
+  version: string;
+  sha256: string;
+}
+
+/** 内置插件聚合视图（按 plugin_id 分组各节点上报的版本）。 */
+export interface BuiltinPluginGroup {
+  plugin_id: string;
+  versions: string[]; // 去重排序（各节点可能版本不一）
+  node_count: number; // 上报该插件的节点数
+  nodes: BuiltinNodeView[];
 }
 
 // ---- 插件仓库（阶段二）----

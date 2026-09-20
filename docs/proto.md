@@ -4,6 +4,7 @@
 ## Table of Contents
 
 - [litesentry.proto](#litesentry-proto)
+    - [BuiltinPlugin](#litesentry-BuiltinPlugin)
     - [Chunk](#litesentry-Chunk)
     - [ContainerMem](#litesentry-ContainerMem)
     - [ContainerMetrics](#litesentry-ContainerMetrics)
@@ -43,6 +44,25 @@ litesentry 数据契约（唯一 proto 源）
 - 通信走 IPv4，Agent 通过 gRPC metadata 携带 token（证书 TLS/mTLS 预留，
   测试阶段明文联调，上线前启用）。
 - Series 通用字段已预留，阶段二插件化直接启用。
+
+
+<a name="litesentry-BuiltinPlugin"></a>
+
+### BuiltinPlugin
+内置插件清单条目：随 agent 发布的内置插件（host/docker/disk），构建期由
+agent/build.rs 算出版本 &#43; SHA-256 写入 agent 内置清单。上报给 Server 后
+Server 可据此做「默认兜底指派」并在插件页展示（不再依赖 Server 侧硬编码）。
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| plugin_id | [string](#string) |  |  |
+| version | [string](#string) |  |  |
+| sha256 | [string](#string) |  |  |
+
+
+
+
 
 
 <a name="litesentry-Chunk"></a>
@@ -359,6 +379,7 @@ litesentry 数据契约（唯一 proto 源）
 | arch | [string](#string) |  |  |
 | kernel | [string](#string) |  |  |
 | version | [string](#string) |  | Agent 构建版本（CARGO_PKG_VERSION） |
+| builtins | [BuiltinPlugin](#litesentry-BuiltinPlugin) | repeated | 本机内置插件清单（阶段二：并入 Server 插件体系） |
 
 
 

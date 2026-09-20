@@ -72,6 +72,7 @@ journalctl -u litesentry-agent -f   # 采集日志
 | `LS_ID_FILE` | `/var/lib/litesentry/agent_id` | agent_id 持久化文件 |
 | `LS_INTERVAL` | `60` | 心跳周期（秒），即上报/下发节拍 |
 | `LS_COLLECT_INTERVAL` | 同 `LS_INTERVAL` | 采集间隔（秒），下发给采集插件；与心跳解耦（可心跳 60s、采集 300s） |
+| `LS_BUILTIN_DIR` | `<agent_exe>/plugins` | 内置采集插件（host/docker/disk）所在目录；**升级 agent 时须同步更新该目录**（SHA-256 按构建期清单复核） |
 | `LS_TLS_CA` | 空 | mTLS：CA 证书 PEM（Agent 校验 Server 身份） |
 | `LS_TLS_CERT` | 空 | mTLS：Agent 客户端证书 PEM |
 | `LS_TLS_KEY` | 空 | mTLS：Agent 客户端私钥 PEM（600 权限） |
@@ -188,10 +189,21 @@ LS_TLS_KEY=/etc/litesentry/agent.key
 
 # 安装二进制 + 开机自启
 install -m 0755 agent/target/release/litesentry-agent /usr/local/bin/litesentry-agent
+# 内置采集插件（host/docker/disk）随 agent 旁路发布，须放到 <agent_exe>/plugins/
+mkdir -p /usr/local/bin/plugins
+install -m 0755 agent/plugins/host/target/release/host     /usr/local/bin/plugins/host
+install -m 0755 agent/plugins/docker/target/release/docker /usr/local/bin/plugins/docker
+install -m 0755 agent/plugins/disk/target/release/disk     /usr/local/bin/plugins/disk
 cp deploy/litesentry-agent.service /etc/systemd/system/
 systemctl daemon-reload && systemctl enable --now litesentry-agent
 journalctl -u litesentry-agent -f   # 查看采集日志
 ```
+
+> ⚠️ **Server 与 Agent 须成对升级**：内置插件体系依赖 `RegisterRequest.builtins` 上报 +
+> Server 侧落 `agents.builtin_json`。旧 Server + 新 agent 会退化为「本地空清单兜底」（采集照跑，
+> 但插件页看不到）；新 Server + 旧 agent 因无内置清单上报**不会播种指派**，插件页同样看不到 ——
+> 两侧版本一致才完整。升级 agent 时**务必同步更新 `/usr/local/bin/plugins/`**（见上），
+> 否则构建期写入的 SHA-256 与文件不符，内置插件会被拒绝启动。
 
 ### 4. 验证 mTLS 端到端
 
@@ -243,4 +255,4 @@ docs/                     # gRPC 契约文档（protoc-gen-doc 生成）
 ## 路线图
 
 - 阶段一（当前）：主机 + 容器 + 地址面板，SQLite 落库，REST 供前端，阈值告警 + 飞书通知。
-- 阶段二（已预留）：Agent 插件化 —— 心跳 + 插件管理 + 传输，插件（Lua / 二进制）由 Server 下发，`Series` 字段承载插件指标。后续 Pro 版可在此基础扩展安全 / AI 能力。
+- 阶段二（已落地）：Agent 插件化 —— 二进制插件由 Server 指派（`DesiredState` 下发 + `FetchPlugin` 分块拉取），`Series` 字段承载插件指标；FRP 隧道管理与定时任务均在 agent 侧执行。**内置采集插件（host/docker/disk）随 agent 旁路发布，并并入同一套插件体系** —— 注册时上报内置清单，Server 做一次性默认兜底指派，此后可像外部插件一样取消指派 / 升级。后续 Pro 版可在此基础扩展安全 / AI 能力。

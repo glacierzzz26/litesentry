@@ -691,6 +691,43 @@ const docTemplate = `{
                 }
             }
         },
+        "/builtins": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "聚合各节点注册上报的内置插件（host/docker/disk），按 id 分组；只读",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "插件"
+                ],
+                "summary": "内置插件清单",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.BuiltinGroupView"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/frp": {
             "get": {
                 "security": [
@@ -1080,7 +1117,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "将某版本插件指派到指定 agent（覆盖旧指派）；agent 下次心跳拉取并执行",
+                "description": "将某版本插件指派到指定 agent（覆盖旧指派）；agent 下次心跳拉取并执行。\nagent_id 可传 \"server\" 或空串表示公网机；内置插件（host/docker/disk）版本须与节点上报清单一致",
                 "consumes": [
                     "application/json"
                 ],
@@ -1119,8 +1156,17 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "400": {
+                        "description": "内置插件版本与节点上报不符",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
-                        "description": "插件版本不存在",
+                        "description": "插件版本不存在 / 未设置公网机 Agent",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1191,7 +1237,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "飞书 webhook 与 secret 是否存在（secret 不回显明文）",
+                "description": "飞书 webhook 与 secret 是否存在（secret 不回显明文）+ 公网机 agent_id",
                 "produces": [
                     "application/json"
                 ],
@@ -1223,7 +1269,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "更新飞书 webhook；secret 为空表示保留原值",
+                "description": "更新飞书 webhook（secret 为空保留原值）与公网机 agent_id（缺省字段 = 不修改）",
                 "consumes": [
                     "application/json"
                 ],
@@ -1239,6 +1285,15 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/api.settingsView"
+                        }
+                    },
+                    "400": {
+                        "description": "公网机 agent_id 未注册",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "401": {
@@ -1846,6 +1901,45 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "api.BuiltinGroupView": {
+            "type": "object",
+            "properties": {
+                "node_count": {
+                    "description": "上报该插件的节点数",
+                    "type": "integer"
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.BuiltinNodeView"
+                    }
+                },
+                "plugin_id": {
+                    "type": "string"
+                },
+                "versions": {
+                    "description": "去重后续（各节点可能版本不一）",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "api.BuiltinNodeView": {
+            "type": "object",
+            "properties": {
+                "hostname": {
+                    "type": "string"
+                },
+                "sha256": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
         "api.assignPluginBody": {
             "type": "object",
             "properties": {
@@ -2006,6 +2100,9 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "feishu_webhook": {
+                    "type": "string"
+                },
+                "server_agent_id": {
                     "type": "string"
                 }
             }

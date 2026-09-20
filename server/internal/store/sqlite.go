@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS agents (
   kernel     TEXT NOT NULL DEFAULT '',
   version    TEXT NOT NULL DEFAULT '',  -- Agent 构建版本（注册上报）
   machine_id TEXT,               -- 机器指纹（注册复用；可为空表示旧节点未注册）
+  builtin_json TEXT NOT NULL DEFAULT '',  -- 内置插件清单（注册上报：id/version/sha256）
   ipv4       TEXT NOT NULL DEFAULT '[]',
   ipv6       TEXT NOT NULL DEFAULT '[]',
   last_seen  INTEGER NOT NULL,
@@ -201,6 +202,7 @@ func (s *SQLite) migrate() error {
 		{"host_metrics", "agent_mem_rss", `ALTER TABLE host_metrics ADD COLUMN agent_mem_rss INTEGER`},
 		{"agents", "machine_id", `ALTER TABLE agents ADD COLUMN machine_id TEXT`},
 		{"agents", "version", `ALTER TABLE agents ADD COLUMN version TEXT`},
+		{"agents", "builtin_json", `ALTER TABLE agents ADD COLUMN builtin_json TEXT NOT NULL DEFAULT ''`},
 		{"tasks", "run_now", `ALTER TABLE tasks ADD COLUMN run_now INTEGER NOT NULL DEFAULT 0`},
 	} {
 		has, err := s.hasColumn(mc.table, mc.col)
@@ -331,19 +333,33 @@ func (s *SQLite) RegisterAgent(ctx context.Context, machineID string, a *Agent) 
 	case err == nil:
 		// 复用历史 agent_id：同步更新元信息与在线时间
 		_, uerr := s.db.ExecContext(ctx, `
-UPDATE agents SET hostname=?, os=?, arch=?, kernel=?, version=?, last_seen=?
+UPDATE agents SET hostname=?, os=?, arch=?, kernel=?, version=?, builtin_json=?, last_seen=?
 WHERE agent_id=?`,
-			a.Hostname, a.OS, a.Arch, a.Kernel, a.Version, a.LastSeen.Unix(), existing)
+			a.Hostname, a.OS, a.Arch, a.Kernel, a.Version, a.BuiltinJSON, a.LastSeen.Unix(), existing)
 		return existing, false, uerr
 	case err != sql.ErrNoRows:
 		return "", false, err
 	}
 	id := newUUID()
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO agents (agent_id, hostname, os, arch, kernel, version, machine_id, last_seen, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, a.Hostname, a.OS, a.Arch, a.Kernel, a.Version, machineID, a.LastSeen.Unix(), a.CreatedAt.Unix())
+INSERT INTO agents (agent_id, hostname, os, arch, kernel, version, machine_id, builtin_json, last_seen, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, a.Hostname, a.OS, a.Arch, a.Kernel, a.Version, machineID, a.BuiltinJSON, a.LastSeen.Unix(), a.CreatedAt.Unix())
 	return id, true, err
+}
+
+// BuiltinManifest 读取节点上报的内置插件清单（JSON 解码；空/旧 agent → 空切片）。
+func (s *SQLite) BuiltinManifest(ctx context.Context, agentID string) ([]BuiltinPlugin, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(builtin_json, '') FROM agents WHERE agent_id = ?`, agentID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return DecodeBuiltinManifest(raw), nil
 }
 
 func (s *SQLite) AppendBatch(ctx context.Context, h *HostSample, disks []*DiskSample, containers []*ContainerSample) error {
@@ -479,7 +495,7 @@ ORDER BY ts, mount`,
 
 func (s *SQLite) Agents(ctx context.Context) ([]*Agent, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT agent_id, hostname, os, arch, kernel, version, ipv4, ipv6, last_seen, created_at
+SELECT agent_id, hostname, os, arch, kernel, version, COALESCE(builtin_json,''), ipv4, ipv6, last_seen, created_at
 FROM agents ORDER BY hostname`)
 	if err != nil {
 		return nil, err
@@ -492,7 +508,7 @@ FROM agents ORDER BY hostname`)
 		var ipv4, ipv6 string
 		var lastSeen, createdAt int64
 		if err := rows.Scan(&a.AgentID, &a.Hostname, &a.OS, &a.Arch, &a.Kernel, &a.Version,
-			&ipv4, &ipv6, &lastSeen, &createdAt); err != nil {
+			&a.BuiltinJSON, &ipv4, &ipv6, &lastSeen, &createdAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(ipv4), &a.IPv4)

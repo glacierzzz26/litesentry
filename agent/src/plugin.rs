@@ -7,7 +7,7 @@
 //! 白名单模型：只运行 Server 指派清单（DesiredState.plugins）内的 plugin_id:version；
 //! 二进制缓存按 plugin_id/version 存放，下载时对末尾分块 SHA-256 校验，缓存复用再次校验。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
@@ -34,7 +34,6 @@ struct Proc {
 pub struct PluginHost {
     cache_dir: PathBuf,
     procs: HashMap<String, Proc>, // plugin_id → 进程
-    builtin_ids: HashSet<String>, // 内置插件（always-on）：apply() 不启停
     tx: mpsc::Sender<Series>,
     rx: mpsc::Receiver<Series>,
     interval: u64, // 上报间隔（秒），作为插件 interval 缺省
@@ -46,7 +45,6 @@ impl PluginHost {
         Self {
             cache_dir: PathBuf::from(cache_dir),
             procs: HashMap::new(),
-            builtin_ids: crate::builtin::BUILTIN_PLUGINS.iter().map(|e| e.id.to_string()).collect(),
             tx,
             rx,
             interval,
@@ -64,13 +62,34 @@ impl PluginHost {
 
     /// 应用 DesiredState 的插件清单（幂等）：停止已移除/变更版本，启动缺失。
     /// 单个插件失败不影响其余（失败隔离，插件问题不拖垮心跳）。
+    ///
+    /// 内置插件（host/docker/disk）已并入 Server 插件体系，与外部插件走**同一套生命周期**：
+    /// Server 首次注册时默认兜底指派，之后由用户增删改（取消指派即停用、指派更高版本即升级）。
+    /// 空清单（旧 Server / 下发异常）时只补齐缺失的内置插件、不停止任何在跑进程，避免采集被误停。
     pub async fn apply(&mut self, client: &mut crate::client::Client, token: &str, desired: &[PluginSpec]) -> Result<()> {
-        // 1. 停止：不再指派，或版本变更（内置插件 always-on，跳过）
+        if desired.is_empty() {
+            // 兜底：Server 未下发任何插件（如旧版 Server）时，补齐缺失的内置采集插件；
+            // 已有进程一律保留（可停用语义依赖此前的非空清单，空清单不代表「都停掉」）。
+            for entry in crate::builtin::BUILTIN_PLUGINS {
+                if self.procs.contains_key(entry.id) {
+                    continue;
+                }
+                let spec = PluginSpec {
+                    plugin_id: entry.id.to_string(),
+                    version: entry.version.to_string(),
+                    args_json: String::new(),
+                };
+                match self.start(client, token, &spec).await {
+                    Ok(()) => info!("内置插件 {}@{} 已启动（空清单兜底）", spec.plugin_id, spec.version),
+                    Err(e) => warn!("内置插件 {}@{} 启动失败: {e}", spec.plugin_id, spec.version),
+                }
+            }
+            return Ok(());
+        }
+
+        // 1. 停止：不再指派，或版本变更
         let current: Vec<String> = self.procs.keys().cloned().collect();
         for id in current {
-            if self.builtin_ids.contains(&id) {
-                continue;
-            }
             let spec = desired.iter().find(|p| p.plugin_id == id);
             match spec {
                 None => self.stop(&id).await,
@@ -91,25 +110,6 @@ impl PluginHost {
             }
         }
         Ok(())
-    }
-
-    /// 启动全部内置插件（阶段二 D2：always-on，不随 DesiredState 启停）。
-    /// 单插件失败（清单缺失 / SHA-256 不匹配 / spawn 失败）仅告警，不影响其余。
-    pub async fn start_builtins(&mut self, client: &mut crate::client::Client, token: &str) {
-        for entry in crate::builtin::BUILTIN_PLUGINS {
-            if self.procs.contains_key(entry.id) {
-                continue;
-            }
-            let spec = PluginSpec {
-                plugin_id: entry.id.to_string(),
-                version: entry.version.to_string(),
-                args_json: String::new(),
-            };
-            match self.start(client, token, &spec).await {
-                Ok(()) => info!("内置插件 {}@{} 已启动", spec.plugin_id, spec.version),
-                Err(e) => warn!("内置插件 {}@{} 启动失败: {e}", spec.plugin_id, spec.version),
-            }
-        }
     }
 
     /// 启动一个长驻插件：确保二进制 → spawn → 写 start 命令 → 后台读 stdout/stderr。

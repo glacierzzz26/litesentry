@@ -1388,6 +1388,69 @@ func (x *PushAck) GetDesiredState() *DesiredState {
 	return nil
 }
 
+// 内置插件清单条目：随 agent 发布的内置插件（host/docker/disk），构建期由
+// agent/build.rs 算出版本 + SHA-256 写入 agent 内置清单。上报给 Server 后
+// Server 可据此做「默认兜底指派」并在插件页展示（不再依赖 Server 侧硬编码）。
+type BuiltinPlugin struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PluginId      string                 `protobuf:"bytes,1,opt,name=plugin_id,json=pluginId,proto3" json:"plugin_id,omitempty"`
+	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	Sha256        string                 `protobuf:"bytes,3,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BuiltinPlugin) Reset() {
+	*x = BuiltinPlugin{}
+	mi := &file_litesentry_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BuiltinPlugin) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BuiltinPlugin) ProtoMessage() {}
+
+func (x *BuiltinPlugin) ProtoReflect() protoreflect.Message {
+	mi := &file_litesentry_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BuiltinPlugin.ProtoReflect.Descriptor instead.
+func (*BuiltinPlugin) Descriptor() ([]byte, []int) {
+	return file_litesentry_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *BuiltinPlugin) GetPluginId() string {
+	if x != nil {
+		return x.PluginId
+	}
+	return ""
+}
+
+func (x *BuiltinPlugin) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *BuiltinPlugin) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
 // 节点注册请求：携带机器自身信息，由 Server 分发 / 复用 agent_id。
 type RegisterRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1396,14 +1459,15 @@ type RegisterRequest struct {
 	Os            string                 `protobuf:"bytes,3,opt,name=os,proto3" json:"os,omitempty"`
 	Arch          string                 `protobuf:"bytes,4,opt,name=arch,proto3" json:"arch,omitempty"`
 	Kernel        string                 `protobuf:"bytes,5,opt,name=kernel,proto3" json:"kernel,omitempty"`
-	Version       string                 `protobuf:"bytes,6,opt,name=version,proto3" json:"version,omitempty"` // Agent 构建版本（CARGO_PKG_VERSION）
+	Version       string                 `protobuf:"bytes,6,opt,name=version,proto3" json:"version,omitempty"`   // Agent 构建版本（CARGO_PKG_VERSION）
+	Builtins      []*BuiltinPlugin       `protobuf:"bytes,7,rep,name=builtins,proto3" json:"builtins,omitempty"` // 本机内置插件清单（阶段二：并入 Server 插件体系）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RegisterRequest) Reset() {
 	*x = RegisterRequest{}
-	mi := &file_litesentry_proto_msgTypes[18]
+	mi := &file_litesentry_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1415,7 +1479,7 @@ func (x *RegisterRequest) String() string {
 func (*RegisterRequest) ProtoMessage() {}
 
 func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_litesentry_proto_msgTypes[18]
+	mi := &file_litesentry_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1428,7 +1492,7 @@ func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterRequest.ProtoReflect.Descriptor instead.
 func (*RegisterRequest) Descriptor() ([]byte, []int) {
-	return file_litesentry_proto_rawDescGZIP(), []int{18}
+	return file_litesentry_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *RegisterRequest) GetHostname() string {
@@ -1473,6 +1537,13 @@ func (x *RegisterRequest) GetVersion() string {
 	return ""
 }
 
+func (x *RegisterRequest) GetBuiltins() []*BuiltinPlugin {
+	if x != nil {
+		return x.Builtins
+	}
+	return nil
+}
+
 type RegisterReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"` // Server 分配：已注册过则复用历史 id，否则新建 UUID
@@ -1483,7 +1554,7 @@ type RegisterReply struct {
 
 func (x *RegisterReply) Reset() {
 	*x = RegisterReply{}
-	mi := &file_litesentry_proto_msgTypes[19]
+	mi := &file_litesentry_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1495,7 +1566,7 @@ func (x *RegisterReply) String() string {
 func (*RegisterReply) ProtoMessage() {}
 
 func (x *RegisterReply) ProtoReflect() protoreflect.Message {
-	mi := &file_litesentry_proto_msgTypes[19]
+	mi := &file_litesentry_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1508,7 +1579,7 @@ func (x *RegisterReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterReply.ProtoReflect.Descriptor instead.
 func (*RegisterReply) Descriptor() ([]byte, []int) {
-	return file_litesentry_proto_rawDescGZIP(), []int{19}
+	return file_litesentry_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *RegisterReply) GetAgentId() string {
@@ -1651,7 +1722,11 @@ const file_litesentry_proto_rawDesc = "" +
 	"\vserver_time\x18\x01 \x01(\tR\n" +
 	"serverTime\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12=\n" +
-	"\rdesired_state\x18\x03 \x01(\v2\x18.litesentry.DesiredStateR\fdesiredState\"\xa2\x01\n" +
+	"\rdesired_state\x18\x03 \x01(\v2\x18.litesentry.DesiredStateR\fdesiredState\"^\n" +
+	"\rBuiltinPlugin\x12\x1b\n" +
+	"\tplugin_id\x18\x01 \x01(\tR\bpluginId\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x16\n" +
+	"\x06sha256\x18\x03 \x01(\tR\x06sha256\"\xd9\x01\n" +
 	"\x0fRegisterRequest\x12\x1a\n" +
 	"\bhostname\x18\x01 \x01(\tR\bhostname\x12\x1d\n" +
 	"\n" +
@@ -1659,7 +1734,8 @@ const file_litesentry_proto_rawDesc = "" +
 	"\x02os\x18\x03 \x01(\tR\x02os\x12\x12\n" +
 	"\x04arch\x18\x04 \x01(\tR\x04arch\x12\x16\n" +
 	"\x06kernel\x18\x05 \x01(\tR\x06kernel\x12\x18\n" +
-	"\aversion\x18\x06 \x01(\tR\aversion\"K\n" +
+	"\aversion\x18\x06 \x01(\tR\aversion\x125\n" +
+	"\bbuiltins\x18\a \x03(\v2\x19.litesentry.BuiltinPluginR\bbuiltins\"K\n" +
 	"\rRegisterReply\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1f\n" +
 	"\vserver_time\x18\x02 \x01(\tR\n" +
@@ -1682,7 +1758,7 @@ func file_litesentry_proto_rawDescGZIP() []byte {
 	return file_litesentry_proto_rawDescData
 }
 
-var file_litesentry_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_litesentry_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_litesentry_proto_goTypes = []any{
 	(*IPAddr)(nil),           // 0: litesentry.IPAddr
 	(*Mem)(nil),              // 1: litesentry.Mem
@@ -1702,10 +1778,11 @@ var file_litesentry_proto_goTypes = []any{
 	(*TaskRunReport)(nil),    // 15: litesentry.TaskRunReport
 	(*MetricsBatch)(nil),     // 16: litesentry.MetricsBatch
 	(*PushAck)(nil),          // 17: litesentry.PushAck
-	(*RegisterRequest)(nil),  // 18: litesentry.RegisterRequest
-	(*RegisterReply)(nil),    // 19: litesentry.RegisterReply
-	nil,                      // 20: litesentry.Series.TagsEntry
-	nil,                      // 21: litesentry.Series.FieldsEntry
+	(*BuiltinPlugin)(nil),    // 18: litesentry.BuiltinPlugin
+	(*RegisterRequest)(nil),  // 19: litesentry.RegisterRequest
+	(*RegisterReply)(nil),    // 20: litesentry.RegisterReply
+	nil,                      // 21: litesentry.Series.TagsEntry
+	nil,                      // 22: litesentry.Series.FieldsEntry
 }
 var file_litesentry_proto_depIdxs = []int32{
 	1,  // 0: litesentry.HostMetrics.mem:type_name -> litesentry.Mem
@@ -1715,8 +1792,8 @@ var file_litesentry_proto_depIdxs = []int32{
 	0,  // 4: litesentry.HostMetrics.ips:type_name -> litesentry.IPAddr
 	5,  // 5: litesentry.ContainerMetrics.mem:type_name -> litesentry.ContainerMem
 	3,  // 6: litesentry.ContainerMetrics.net:type_name -> litesentry.Net
-	20, // 7: litesentry.Series.tags:type_name -> litesentry.Series.TagsEntry
-	21, // 8: litesentry.Series.fields:type_name -> litesentry.Series.FieldsEntry
+	21, // 7: litesentry.Series.tags:type_name -> litesentry.Series.TagsEntry
+	22, // 8: litesentry.Series.fields:type_name -> litesentry.Series.FieldsEntry
 	8,  // 9: litesentry.DesiredState.plugins:type_name -> litesentry.PluginSpec
 	9,  // 10: litesentry.DesiredState.tasks:type_name -> litesentry.TaskSpec
 	13, // 11: litesentry.FrpStatus.tunnels:type_name -> litesentry.FrpTunnelStatus
@@ -1726,19 +1803,20 @@ var file_litesentry_proto_depIdxs = []int32{
 	14, // 15: litesentry.MetricsBatch.frp:type_name -> litesentry.FrpStatus
 	15, // 16: litesentry.MetricsBatch.task_runs:type_name -> litesentry.TaskRunReport
 	10, // 17: litesentry.PushAck.desired_state:type_name -> litesentry.DesiredState
-	18, // 18: litesentry.Agent.Register:input_type -> litesentry.RegisterRequest
-	16, // 19: litesentry.Agent.Push:input_type -> litesentry.MetricsBatch
-	11, // 20: litesentry.Agent.FetchPlugin:input_type -> litesentry.PluginRequest
-	16, // 21: litesentry.Agent.Stream:input_type -> litesentry.MetricsBatch
-	19, // 22: litesentry.Agent.Register:output_type -> litesentry.RegisterReply
-	17, // 23: litesentry.Agent.Push:output_type -> litesentry.PushAck
-	12, // 24: litesentry.Agent.FetchPlugin:output_type -> litesentry.Chunk
-	17, // 25: litesentry.Agent.Stream:output_type -> litesentry.PushAck
-	22, // [22:26] is the sub-list for method output_type
-	18, // [18:22] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	18, // 18: litesentry.RegisterRequest.builtins:type_name -> litesentry.BuiltinPlugin
+	19, // 19: litesentry.Agent.Register:input_type -> litesentry.RegisterRequest
+	16, // 20: litesentry.Agent.Push:input_type -> litesentry.MetricsBatch
+	11, // 21: litesentry.Agent.FetchPlugin:input_type -> litesentry.PluginRequest
+	16, // 22: litesentry.Agent.Stream:input_type -> litesentry.MetricsBatch
+	20, // 23: litesentry.Agent.Register:output_type -> litesentry.RegisterReply
+	17, // 24: litesentry.Agent.Push:output_type -> litesentry.PushAck
+	12, // 25: litesentry.Agent.FetchPlugin:output_type -> litesentry.Chunk
+	17, // 26: litesentry.Agent.Stream:output_type -> litesentry.PushAck
+	23, // [23:27] is the sub-list for method output_type
+	19, // [19:23] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_litesentry_proto_init() }
@@ -1752,7 +1830,7 @@ func file_litesentry_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_litesentry_proto_rawDesc), len(file_litesentry_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

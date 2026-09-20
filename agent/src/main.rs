@@ -66,6 +66,11 @@ async fn main() -> Result<()> {
             arch,
             kernel,
             version: env!("CARGO_PKG_VERSION").to_string(),
+            // 内置插件清单上报：Server 据此做默认兜底指派 + 插件页展示
+            builtins: crate::builtin::manifest()
+                .into_iter()
+                .map(|(id, v, sha)| (id.to_string(), v.to_string(), sha.to_string()))
+                .collect(),
         };
         let id = client.register(&cfg.token, &info).await?;
         cache_agent_id(&cfg.id_file, &id);
@@ -81,8 +86,10 @@ async fn main() -> Result<()> {
     );
 
     let mut host = plugin::PluginHost::new(&cfg.plugin_dir, cfg.collect_secs);
-    // S2：拉起内置采集插件（host/docker/disk），always-on
-    host.start_builtins(&mut client, &cfg.token).await;
+    // 内置采集插件（host/docker/disk）已并入 Server 插件体系：不再启动即拉起，
+    // 统一由首轮心跳的 DesiredState 驱动（Server 默认兜底指派，取消指派即停用）。
+    // 空 DesiredState 时 apply() 内部会补齐缺失的内置插件作为兜底，见 plugin.rs。
+    tracing::info!("等待 Server 下发插件清单（内置插件由 DesiredState 指派）");
 
     // S3：frp 进程管理器（frps/frpc，配置经 DesiredState 下发）
     let mut frp_mgr = frp::FrpManager::new(&cfg.frp_dir, &cfg.state_dir);

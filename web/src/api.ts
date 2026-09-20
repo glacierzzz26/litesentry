@@ -8,6 +8,7 @@ import type {
   AlertEvent,
   AlertRule,
   AssignPluginBody,
+  BuiltinPluginGroup,
   ContainerSample,
   DiskSample,
   FrpConfigView,
@@ -190,6 +191,8 @@ export const api = {
 
   // ---- 插件仓库（阶段二）----
   plugins: () => get<Plugin[]>('/api/plugins'),
+  // 内置插件（随 agent 发布，Server 只读聚合各节点上报清单）——不在 plugins 仓库中。
+  builtins: () => get<BuiltinPluginGroup[]>('/api/builtins'),
   pluginDetail: (id: string) => get<Plugin[]>(`/api/plugins/${encodeURIComponent(id)}`),
   // 上传 multipart：不经 request()（后者强制 JSON Content-Type），单独走 fetch 但复用鉴权/错误处理。
   uploadPlugin: (file: File, b: SavePluginBody): Promise<Plugin> => {
@@ -216,6 +219,7 @@ export type {
   AlertEvent,
   AlertRule,
   AssignPluginBody,
+  BuiltinPluginGroup,
   ContainerSample,
   DiskSample,
   FrpConfigView,

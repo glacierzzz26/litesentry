@@ -138,21 +138,21 @@ func (s *Server) agentHosts(ctx context.Context) map[string]string {
 // taskViewOf 构造任务视图：目标节点显示名解析（'' → server_agent_id → 主机名；未知 → 未知节点）。
 func (s *Server) taskViewOf(ctx context.Context, t *store.Task, hosts map[string]string) taskView {
 	v := taskView{
-		ID:              t.ID,
-		Name:            t.Name,
-		Description:     t.Description,
-		TargetAgentID:   t.TargetAgentID,
-		Cron:            t.Cron,
-		PluginID:        t.PluginID,
-		ArgsJSON:        t.ArgsJSON,
-		TimeoutS:        t.TimeoutS,
-		Enabled:         t.Enabled,
-		RunNow:          t.RunNow,
-		LastRunAt:       t.LastRunAt,
-		LastStatus:      t.LastStatus,
-		LastOutputTail:  t.LastOutputTail,
-		CreatedAt:       t.CreatedAt,
-		UpdatedAt:       t.UpdatedAt,
+		ID:             t.ID,
+		Name:           t.Name,
+		Description:    t.Description,
+		TargetAgentID:  t.TargetAgentID,
+		Cron:           t.Cron,
+		PluginID:       t.PluginID,
+		ArgsJSON:       t.ArgsJSON,
+		TimeoutS:       t.TimeoutS,
+		Enabled:        t.Enabled,
+		RunNow:         t.RunNow,
+		LastRunAt:      t.LastRunAt,
+		LastStatus:     t.LastStatus,
+		LastOutputTail: t.LastOutputTail,
+		CreatedAt:      t.CreatedAt,
+		UpdatedAt:      t.UpdatedAt,
 	}
 	if t.TargetAgentID == "" {
 		v.TargetAgentName = "公网机（Server 同机）"
@@ -387,7 +387,36 @@ func (s *Server) agentPlugins(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, rows)
+	// 标记内置插件（host/docker/disk）：前端任务表单据此过滤——内置采集插件未实现
+	// 一次性 run 分支，故选它只会超时。内置名单以该节点上报的清单为准。
+	builtin := map[string]bool{}
+	for _, b := range s.builtinIDs(ctx, agentID) {
+		builtin[b] = true
+	}
+	out := make([]agentPluginView, 0, len(rows))
+	for _, ap := range rows {
+		out = append(out, agentPluginView{AgentPlugin: *ap, Builtin: builtin[ap.PluginID]})
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// agentPluginView 节点已指派插件视图：在 AgentPlugin 之上加 builtin 标记。
+type agentPluginView struct {
+	store.AgentPlugin
+	Builtin bool `json:"builtin"`
+}
+
+// builtinIDs 该节点上报的内置插件 id 集合（旧 agent 未上报 → 空集，标记全 false）。
+func (s *Server) builtinIDs(ctx context.Context, agentID string) []string {
+	items, err := s.st.BuiltinManifest(ctx, agentID)
+	if err != nil {
+		return nil
+	}
+	ids := make([]string, 0, len(items))
+	for _, b := range items {
+		ids = append(ids, b.PluginID)
+	}
+	return ids
 }
 
 // validCron 轻量校验标准 5 段 cron（分 时 日 月 周）。

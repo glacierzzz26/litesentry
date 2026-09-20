@@ -207,7 +207,10 @@ export default function Tasks() {
     { value: SERVER_TARGET, label: '公网机（Server 同机）' },
     ...agents.map((a) => ({ value: a.agent_id, label: a.hostname })),
   ];
-  const pluginOptions = pluginOpts.map((p) => ({ value: p.plugin_id, label: `${p.plugin_id}@${p.version}` }));
+  // 内置采集插件（host/docker/disk）只实现常驻采集，无一次性 run 分支 —— 选它们只会超时，故过滤。
+  const pluginOptions = pluginOpts
+    .filter((p) => !p.builtin)
+    .map((p) => ({ value: p.plugin_id, label: `${p.plugin_id}@${p.version}` }));
 
   if (loading && rows.length === 0) {
     return <div className="card p-4"><Skeleton active paragraph={{ rows: 6 }} /></div>;
@@ -304,6 +307,7 @@ export default function Tasks() {
               name="plugin_id"
               label="插件（目标节点已指派）"
               rules={[{ required: true, message: '请选择插件' }]}
+              extra="内置采集插件（host/docker/disk）不支持定时执行，此处不列出"
             >
               <Select placeholder="选择插件" options={pluginOptions} />
             </Form.Item>

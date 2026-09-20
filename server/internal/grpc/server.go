@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
+	"log"
 	"os"
 	"sort"
 	"strconv"
@@ -112,15 +113,29 @@ func (s *Server) Register(ctx context.Context, req *litesentrypb.RegisterRequest
 		return nil, status.Error(codes.InvalidArgument, "empty machine_id")
 	}
 	now := time.Now().UTC()
+	// 内置插件清单：agent 上报随其发布的内置插件（host/docker/disk），落库供
+	// 「默认兜底指派」与插件页展示；旧 agent 无此字段 → 空清单（不播种，保持旧行为）。
+	builtins := make([]store.BuiltinPlugin, 0, len(req.GetBuiltins()))
+	for _, b := range req.GetBuiltins() {
+		if b.GetPluginId() == "" || b.GetVersion() == "" {
+			continue
+		}
+		builtins = append(builtins, store.BuiltinPlugin{
+			PluginID: b.GetPluginId(),
+			Version:  b.GetVersion(),
+			SHA256:   b.GetSha256(),
+		})
+	}
 	a := &store.Agent{
-		Hostname:  req.GetHostname(),
-		OS:        req.GetOs(),
-		Arch:      req.GetArch(),
-		Kernel:    req.GetKernel(),
-		Version:   req.GetVersion(),
-		MachineID: req.GetMachineId(),
-		LastSeen:  now,
-		CreatedAt: now,
+		Hostname:    req.GetHostname(),
+		OS:          req.GetOs(),
+		Arch:        req.GetArch(),
+		Kernel:      req.GetKernel(),
+		Version:     req.GetVersion(),
+		MachineID:   req.GetMachineId(),
+		BuiltinJSON: store.EncodeBuiltinManifest(builtins),
+		LastSeen:    now,
+		CreatedAt:   now,
 	}
 	id, _, err := s.store.RegisterAgent(ctx, req.GetMachineId(), a)
 	if err != nil {
@@ -421,6 +436,48 @@ func (s *Server) persist(ctx context.Context, batch *litesentrypb.MetricsBatch) 
 	return nil
 }
 
+// seedBuiltinAssignments 为节点做一次性「内置插件默认兜底指派」。
+//
+// 背景：host/docker/disk 原为 agent always-on 旁路，不进 DesiredState；并入插件体系后
+// 改为「Server 按 agent 上报的内置清单自动指派」——开箱即用由这里保证，取消指派即停用
+// 由 builtin_seeded 标记保证（只播种一次，用户删除后不再复活）。
+func (s *Server) seedBuiltinAssignments(ctx context.Context, agentID string) error {
+	marker := "builtin_seeded:" + agentID
+	if v, _ := s.store.GetSetting(ctx, marker); v != "" {
+		return nil // 已播种过（用户后续增删改不再干预）
+	}
+	builtins, err := s.store.BuiltinManifest(ctx, agentID)
+	if err != nil {
+		return err
+	}
+	if len(builtins) == 0 {
+		// 旧 agent 未上报内置清单：不播种，也不打标记（升级后重连即可正常播种）
+		return nil
+	}
+	existing, err := s.store.AgentPlugins(ctx, agentID)
+	if err != nil {
+		return err
+	}
+	assigned := make(map[string]bool, len(existing))
+	for _, ap := range existing {
+		assigned[ap.PluginID] = true
+	}
+	for _, b := range builtins {
+		if assigned[b.PluginID] {
+			continue
+		}
+		if err := s.store.AssignPlugin(ctx, &store.AgentPlugin{
+			AgentID:  agentID,
+			PluginID: b.PluginID,
+			Version:  b.Version,
+		}); err != nil {
+			return fmt.Errorf("指派内置插件 %s@%s: %w", b.PluginID, b.Version, err)
+		}
+		log.Printf("已为节点 %s 默认指派内置插件 %s@%s", agentID, b.PluginID, b.Version)
+	}
+	return s.store.SetSetting(ctx, marker, "1")
+}
+
 // desiredState 构造某 agent 的下发期望状态：插件 manifest + frp 配置 + 定时任务。
 // state_version = 内容哈希（FNV-1a 64bit）：内容不变则版本不变（agent 跳过重应用），任一变更则变化。
 func (s *Server) desiredState(ctx context.Context, agentID string) (*litesentrypb.DesiredState, error) {
@@ -439,6 +496,15 @@ func (s *Server) desiredState(ctx context.Context, agentID string) (*litesentryp
 			ds.FrpEnabled = true
 			ds.FrpToml = toml
 		}
+	}
+
+	// 内置插件（host/docker/disk）并入插件体系后，为每个节点做一次性「默认兜底指派」：
+	// agent 注册上报的内置清单在此落成 agent_plugins 行，节点即可经统一的 DesiredState
+	// 生命周期拉起（不再依赖 agent 的 always-on）。标记 builtin_seeded:<agent_id> 保证
+	// 只播种一次——用户此后取消指派不会被重新塞回（「可完全停用」语义）。
+	if err := s.seedBuiltinAssignments(ctx, agentID); err != nil {
+		// 播种失败不阻断下发：node 仍有旧 always-on 兜底（agent 侧空清单兜底）
+		log.Printf("播种内置插件指派失败 agent=%s: %v", agentID, err)
 	}
 
 	aps, err := s.store.AgentPlugins(ctx, agentID)

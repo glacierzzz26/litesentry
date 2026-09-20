@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
 
 	"github.com/gin-gonic/gin"
 
@@ -21,6 +22,72 @@ var (
 
 // maxPluginSize 插件二进制上限（64MB，个人工具绰绰有余）。
 const maxPluginSize = 64 << 20
+
+// BuiltinGroupView 内置插件视图：按 plugin_id 聚合各节点上报的版本（只读展示）。
+// 内置插件随 agent 二进制发布，不在 plugins 表中，故单独聚合上报清单呈现。
+type BuiltinGroupView struct {
+	PluginID  string            `json:"plugin_id"`
+	Versions  []string          `json:"versions"`   // 去重后续（各节点可能版本不一）
+	NodeCount int               `json:"node_count"` // 上报该插件的节点数
+	Nodes     []BuiltinNodeView `json:"nodes"`
+}
+
+// BuiltinNodeView 单节点内置插件条目（节点一律以主机名呈现，agent_id 不回传）。
+type BuiltinNodeView struct {
+	Hostname string `json:"hostname"`
+	Version  string `json:"version"`
+	SHA256   string `json:"sha256"`
+}
+
+// listBuiltins 内置插件清单（各节点上报聚合）。
+// @Summary     内置插件清单
+// @Description 聚合各节点注册上报的内置插件（host/docker/disk），按 id 分组；只读
+// @Tags        插件
+// @Produce     json
+// @Success     200 {array} BuiltinGroupView
+// @Failure     401 {object} map[string]string
+// @Security    BearerAuth
+// @Router      /builtins [get]
+func (s *Server) listBuiltins(c *gin.Context) {
+	ctx := c.Request.Context()
+	agents, err := s.st.Agents(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	groups := map[string]*BuiltinGroupView{}
+	seenVer := map[string]map[string]bool{}
+	for _, a := range agents {
+		if a.BuiltinJSON == "" {
+			continue
+		}
+		for _, b := range store.DecodeBuiltinManifest(a.BuiltinJSON) {
+			g := groups[b.PluginID]
+			if g == nil {
+				g = &BuiltinGroupView{PluginID: b.PluginID}
+				groups[b.PluginID] = g
+				seenVer[b.PluginID] = map[string]bool{}
+			}
+			if !seenVer[b.PluginID][b.Version] {
+				seenVer[b.PluginID][b.Version] = true
+				g.Versions = append(g.Versions, b.Version)
+			}
+			hostname := a.Hostname
+			if hostname == "" {
+				hostname = "未知节点"
+			}
+			g.Nodes = append(g.Nodes, BuiltinNodeView{Hostname: hostname, Version: b.Version, SHA256: b.SHA256})
+			g.NodeCount++
+		}
+	}
+	out := make([]*BuiltinGroupView, 0, len(groups))
+	for _, g := range groups {
+		sort.Strings(g.Versions)
+		out = append(out, g)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PluginID < out[j].PluginID })
+	c.JSON(http.StatusOK, out)
+}
 
 // listPlugins 插件仓库列表（全部版本）。
 // @Summary     插件仓库
@@ -147,15 +214,20 @@ type assignPluginBody struct {
 }
 
 // assignPlugin 指派插件到某 agent（DesiredState manifest 来源）。
+// agent_id 为空串或哨兵 server → 均解析公网机（settings.server_agent_id），与 tasks.go/frp.go 同约定。
+// 校验：非内置插件版本必须已上传（防 manifest 指向不存在的发布物）；内置插件版本随
+// agent 发布、不在 plugins 表，故改以该节点上报的内置清单为准（支持「取消指派后再恢复」）。
 // @Summary     指派插件
-// @Description 将某版本插件指派到指定 agent（覆盖旧指派）；agent 下次心跳拉取并执行
+// @Description 将某版本插件指派到指定 agent（覆盖旧指派）；agent 下次心跳拉取并执行。
+// @Description agent_id 可传 "server" 或空串表示公网机；内置插件（host/docker/disk）版本须与节点上报清单一致
 // @Tags        插件
 // @Accept      json
 // @Produce     json
 // @Param       id path string true "插件标识"
 // @Param       body body api.assignPluginBody true "agent_id / version / args_json"
 // @Success     200 {object} map[string]string
-// @Failure     404 {object} map[string]string "插件版本不存在"
+// @Failure     400 {object} map[string]string "内置插件版本与节点上报不符"
+// @Failure     404 {object} map[string]string "插件版本不存在 / 未设置公网机 Agent"
 // @Security    BearerAuth
 // @Router      /plugins/{id}/assign [post]
 func (s *Server) assignPlugin(c *gin.Context) {
@@ -165,17 +237,51 @@ func (s *Server) assignPlugin(c *gin.Context) {
 		return
 	}
 	id := c.Param("id")
-	if body.AgentID == "" || body.Version == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "agent_id/version 不能为空"})
+	if body.Version == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "version 不能为空"})
 		return
 	}
-	// 校验插件版本存在（防 manifest 白名单指向不存在的发布物）
-	if _, err := s.st.GetPlugin(c.Request.Context(), id, body.Version); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "插件版本不存在"})
-		return
+	// agent_id：空串与哨兵 server 同义，均指「公网机（Server 同机 agent）」——
+	// 与 tasks.go resolveTargetAgent（'' = 公网机）及 FRP 页哨兵约定一致，两种写法都收。
+	ctx := c.Request.Context()
+	agentID := body.AgentID
+	if agentID == "" || agentID == serverPathID {
+		agentID, _ = s.st.GetSetting(ctx, "server_agent_id")
+		if agentID == "" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "未设置公网机 Agent（settings.server_agent_id）"})
+			return
+		}
 	}
-	if err := s.st.AssignPlugin(c.Request.Context(), &store.AgentPlugin{
-		AgentID:  body.AgentID,
+	// 版本校验：内置插件版本以节点上报清单为准（不在 plugins 表）；外置插件须已上传。
+	manifest, mErr := s.st.BuiltinManifest(ctx, agentID)
+	if mErr != nil {
+		// 读清单失败不阻断：退化为「只查插件仓库」（旧 agent / 存储异常时行为与改动前一致）
+		manifest = nil
+	}
+	builtinVer := ""
+	for _, b := range manifest {
+		if b.PluginID == id && b.Version == body.Version {
+			builtinVer = b.Version
+			break
+		}
+	}
+	if builtinVer == "" {
+		if _, err := s.st.GetPlugin(ctx, id, body.Version); err != nil {
+			// 内置 id 但版本不符 → 明确指出（避免用户以为内置插件版本可选任意值）
+			for _, b := range manifest {
+				if b.PluginID == id {
+					c.JSON(http.StatusBadRequest, gin.H{
+						"error": "内置插件版本须与节点上报一致：本节点为 " + b.Version,
+					})
+					return
+				}
+			}
+			c.JSON(http.StatusNotFound, gin.H{"error": "插件版本不存在"})
+			return
+		}
+	}
+	if err := s.st.AssignPlugin(ctx, &store.AgentPlugin{
+		AgentID:  agentID,
 		PluginID: id,
 		Version:  body.Version,
 		ArgsJSON: body.ArgsJSON,

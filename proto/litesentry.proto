@@ -177,6 +177,15 @@ message PushAck {
 
 // ============ 注册 ============
 
+// 内置插件清单条目：随 agent 发布的内置插件（host/docker/disk），构建期由
+// agent/build.rs 算出版本 + SHA-256 写入 agent 内置清单。上报给 Server 后
+// Server 可据此做「默认兜底指派」并在插件页展示（不再依赖 Server 侧硬编码）。
+message BuiltinPlugin {
+  string plugin_id = 1;
+  string version   = 2;
+  string sha256    = 3;
+}
+
 // 节点注册请求：携带机器自身信息，由 Server 分发 / 复用 agent_id。
 message RegisterRequest {
   string hostname   = 1;
@@ -185,6 +194,7 @@ message RegisterRequest {
   string arch       = 4;
   string kernel     = 5;
   string version    = 6;   // Agent 构建版本（CARGO_PKG_VERSION）
+  repeated BuiltinPlugin builtins = 7;   // 本机内置插件清单（阶段二：并入 Server 插件体系）
 }
 
 message RegisterReply {

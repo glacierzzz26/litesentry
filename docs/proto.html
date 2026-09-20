@@ -179,6 +179,10 @@
             <ul>
               
                 <li>
+                  <a href="#litesentry.BuiltinPlugin"><span class="badge">M</span>BuiltinPlugin</a>
+                </li>
+              
+                <li>
                   <a href="#litesentry.Chunk"><span class="badge">M</span>Chunk</a>
                 </li>
               
@@ -287,6 +291,44 @@
       </div>
       <p>litesentry 数据契约（唯一 proto 源）</p><p>阶段一：Agent 定时上报主机 + 容器指标。</p><p>- 通信走 IPv4，Agent 通过 gRPC metadata 携带 token（证书 TLS/mTLS 预留，</p><p>测试阶段明文联调，上线前启用）。</p><p>- Series 通用字段已预留，阶段二插件化直接启用。</p>
 
+      
+        <h3 id="litesentry.BuiltinPlugin">BuiltinPlugin</h3>
+        <p>内置插件清单条目：随 agent 发布的内置插件（host/docker/disk），构建期由</p><p>agent/build.rs 算出版本 + SHA-256 写入 agent 内置清单。上报给 Server 后</p><p>Server 可据此做「默认兜底指派」并在插件页展示（不再依赖 Server 侧硬编码）。</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>plugin_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>version</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>sha256</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
       
         <h3 id="litesentry.Chunk">Chunk</h3>
         <p></p>
@@ -1130,6 +1172,13 @@
                   <td><a href="#string">string</a></td>
                   <td></td>
                   <td><p>Agent 构建版本（CARGO_PKG_VERSION） </p></td>
+                </tr>
+              
+                <tr>
+                  <td>builtins</td>
+                  <td><a href="#litesentry.BuiltinPlugin">BuiltinPlugin</a></td>
+                  <td>repeated</td>
+                  <td><p>本机内置插件清单（阶段二：并入 Server 插件体系） </p></td>
                 </tr>
               
             </tbody>
