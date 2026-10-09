@@ -170,7 +170,7 @@ export const api = {
 
   settings: () => get<SettingsView>('/api/settings'),
   saveSettings: (b: SettingsBody) => put<SettingsView>('/api/settings', b),
-  feishuTest: () => post<{ status: string; message: string }>('/api/settings/feishu-test'),
+  notifyTest: () => post<{ status: string; message: string }>('/api/settings/notify-test'),
 
   // ---- FRP 隧道 ----
   frpConfigs: () => get<FrpConfigView[]>('/api/frp'),

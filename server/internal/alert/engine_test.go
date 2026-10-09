@@ -48,15 +48,22 @@ func (f *fakeStore) ResolveEvent(_ context.Context, id string, at time.Time) err
 	return nil
 }
 
-// newTestEngine 构造引擎并把 Notify 换成计数 stub。
-func newTestEngine(f *fakeStore) (*Engine, *int) {
-	notified := new(int)
+// notifyRec 记录型 Notify stub：留存每次通知（含 status/alert_key），供断言。
+type notifyRec struct {
+	notices []Notification
+}
+
+func (r *notifyRec) calls() int { return len(r.notices) }
+
+// newTestEngine 构造引擎并把 Notify 换成记录 stub。
+func newTestEngine(f *fakeStore) (*Engine, *notifyRec) {
+	rec := &notifyRec{}
 	e := New(f)
-	e.Notify = func(context.Context, *store.AlertEvent) (time.Time, error) {
-		*notified++
+	e.Notify = func(_ context.Context, n Notification) (time.Time, error) {
+		rec.notices = append(rec.notices, n)
 		return time.Now(), nil
 	}
-	return e, notified
+	return e, rec
 }
 
 func cpuRule(durationS int64) *store.AlertRule {
@@ -73,7 +80,7 @@ func TestDurationBasedFiring(t *testing.T) {
 		rules: []*store.AlertRule{cpuRule(180)},
 		hosts: map[string][]*store.HostSample{"a1": {{AgentID: "a1", CPUPct: 90}}},
 	}
-	e, notified := newTestEngine(f)
+	e, rec := newTestEngine(f)
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	ctx := context.Background()
 	a := agent()
@@ -81,8 +88,8 @@ func TestDurationBasedFiring(t *testing.T) {
 	// 前两次评估未达 180s：不触发
 	e.check(ctx, base, cpuRule(180), a, "", "", 90)
 	e.check(ctx, base.Add(60*time.Second), cpuRule(180), a, "", "", 90)
-	if len(f.events) != 0 || *notified != 0 {
-		t.Fatalf("提前触发: events=%d notified=%d", len(f.events), *notified)
+	if len(f.events) != 0 || rec.calls() != 0 {
+		t.Fatalf("提前触发: events=%d notified=%d", len(f.events), rec.calls())
 	}
 	// 恰好 180s：触发
 	e.check(ctx, base.Add(180*time.Second), cpuRule(180), a, "", "", 90)
@@ -92,8 +99,11 @@ func TestDurationBasedFiring(t *testing.T) {
 	if f.events[0].State != "firing" {
 		t.Errorf("state = %s, want firing", f.events[0].State)
 	}
-	if *notified != 1 {
-		t.Errorf("notify calls = %d, want 1", *notified)
+	if rec.calls() != 1 {
+		t.Errorf("notify calls = %d, want 1", rec.calls())
+	}
+	if rec.notices[0].Status != "firing" || rec.notices[0].AlertKey != "r1|a1|" {
+		t.Errorf("firing 通知身份错误: %+v", rec.notices[0])
 	}
 }
 
@@ -109,7 +119,7 @@ func TestImmediateFiring(t *testing.T) {
 
 func TestResolve(t *testing.T) {
 	f := &fakeStore{rules: []*store.AlertRule{cpuRule(0)}}
-	e, _ := newTestEngine(f)
+	e, rec := newTestEngine(f)
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	ctx := context.Background()
 	a := agent()
@@ -122,29 +132,42 @@ func TestResolve(t *testing.T) {
 	if f.events[0].State != "resolved" || f.events[0].ResolvedAt == nil {
 		t.Fatalf("恢复后应 resolve: %+v", f.events[0])
 	}
+	// 恢复也应通知一次：firing + resolved = 2 次，且 resolved 带 alert_key。
+	if rec.calls() != 2 {
+		t.Fatalf("应触发+恢复各通知一次, got %d", rec.calls())
+	}
+	r := rec.notices[1]
+	if r.Status != "resolved" || r.AlertKey != "r1|a1|" || r.Event.State != "resolved" {
+		t.Fatalf("resolved 通知身份错误: %+v", r)
+	}
 }
 
 func TestNotifyCooldown(t *testing.T) {
 	f := &fakeStore{rules: []*store.AlertRule{cpuRule(0)}}
-	e, notified := newTestEngine(f)
+	e, rec := newTestEngine(f)
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	ctx := context.Background()
 	a := agent()
 
 	e.check(ctx, base, cpuRule(0), a, "", "", 90) // 触发并通知
-	if *notified != 1 {
-		t.Fatalf("首次触发应通知, got %d", *notified)
+	if rec.calls() != 1 {
+		t.Fatalf("首次触发应通知, got %d", rec.calls())
 	}
+	fireID := rec.notices[0].Event.ID
 	e.check(ctx, base.Add(5*time.Minute), cpuRule(0), a, "", "", 90) // 5min < 30min 冷却
-	if *notified != 1 {
-		t.Fatalf("冷却期内不应重发, got %d", *notified)
+	if rec.calls() != 1 {
+		t.Fatalf("冷却期内不应重发, got %d", rec.calls())
 	}
 	e.check(ctx, base.Add(30*time.Minute), cpuRule(0), a, "", "", 90) // 到期重发
-	if *notified != 2 {
-		t.Fatalf("冷却到期应重发, got %d", *notified)
+	if rec.calls() != 2 {
+		t.Fatalf("冷却到期应重发, got %d", rec.calls())
 	}
 	if len(f.events) != 1 {
 		t.Errorf("重发不应新建事件, events=%d", len(f.events))
+	}
+	// 重发用确定性新 event_id（fireID-r1），避免与首发内容不同而撞 nexus 409。
+	if got := rec.notices[1].Event.ID; got != fireID+"-r1" {
+		t.Errorf("重发 event_id = %q, want %q", got, fireID+"-r1")
 	}
 }
 

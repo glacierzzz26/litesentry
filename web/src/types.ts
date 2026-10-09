@@ -143,16 +143,25 @@ export interface LoginResult {
 // ---- 设置 ----
 
 export interface SettingsView {
-  feishu_webhook: string;
-  feishu_secret_set: boolean;
+  /** nexus 事件中心地址（如 https://nexus.5home.online）。 */
+  nexus_url: string;
+  /** nexus 数据源名（默认 litesentry）。 */
+  nexus_source: string;
+  /** ingest token 是否已配置（不回传明文）。 */
+  nexus_ingest_token_set: boolean;
   /** 公网机（Server 同机 agent）的 agent_id；未声明时为空串。前端不直接展示，仅用于选择器回填。 */
   server_agent_id: string;
 }
 
 export interface SettingsBody {
-  feishu_webhook: string;
-  feishu_secret?: string;
-  feishu_secret_clear?: boolean;
+  /** 缺省（undefined）= 不修改。 */
+  nexus_url?: string;
+  /** 缺省（undefined）= 不修改。 */
+  nexus_source?: string;
+  /** 空串 = 保留原值；填值 = 覆盖。 */
+  nexus_ingest_token?: string;
+  /** 勾选 = 清除已保存的 token。 */
+  nexus_ingest_token_clear?: boolean;
   /** 缺省（undefined）= 不修改；空串 = 清除公网机声明。 */
   server_agent_id?: string;
 }

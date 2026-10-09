@@ -74,7 +74,7 @@ func (s *Server) Routes() *gin.Engine {
 
 		api.GET("/settings", s.getSettings)
 		api.PUT("/settings", s.putSettings)
-		api.POST("/settings/feishu-test", s.feishuTest)
+		api.POST("/settings/notify-test", s.notifyTest)
 
 		api.GET("/plugins", s.listPlugins)
 		api.GET("/builtins", s.listBuiltins)
@@ -275,28 +275,31 @@ func (s *Server) containerSeries(c *gin.Context) {
 
 // ---- 设置 ----
 
-// settingsView 设置视图：secret 只回传是否已设置，不泄漏原文。
+// settingsView 设置视图：ingest token 只回传是否已设置，不泄漏原文。
 // ServerAgentID 是「公网机（Server 同机 agent）」的 agent_id，为 frps 归属 / 任务目标 /
 // 内置插件指派所依赖；未设置（未上报或未指定）时为空串，前端据此提示。
+// Nexus* 是告警上报到 nexus 事件中心的配置（地址 / 数据源名 / token 是否已设）。
 type settingsView struct {
-	FeishuWebhook   string `json:"feishu_webhook"`
-	FeishuSecretSet bool   `json:"feishu_secret_set"`
-	ServerAgentID   string `json:"server_agent_id"`
+	NexusURL      string `json:"nexus_url"`
+	NexusSource   string `json:"nexus_source"`
+	NexusTokenSet bool   `json:"nexus_ingest_token_set"`
+	ServerAgentID string `json:"server_agent_id"`
 }
 
-// settingsBody 设置写入体（空 secret = 保留原值；feishu_secret_clear = 显式清除）。
-// ServerAgentID：nil = 不修改；指向空串 = 清除（与 feishu 的「空即保留」不同，
-// 因为「取消公网机声明」也是合法状态）。
+// settingsBody 设置写入体。NexusURL/NexusSource/ServerAgentID 为指针：nil = 不修改
+// （多表单各写各的字段，避免互相覆盖）；为空串 = 清除。
+// skip 语义与「空即保留」的 token 不同（token 走 NexusToken / NexusTokenClear）。
 type settingsBody struct {
-	FeishuWebhook     string  `json:"feishu_webhook"`
-	FeishuSecret      string  `json:"feishu_secret"`
-	FeishuSecretClear bool    `json:"feishu_secret_clear"`
-	ServerAgentID     *string `json:"server_agent_id"`
+	NexusURL        *string `json:"nexus_url"`
+	NexusSource     *string `json:"nexus_source"`
+	NexusToken      string  `json:"nexus_ingest_token"`
+	NexusTokenClear bool    `json:"nexus_ingest_token_clear"`
+	ServerAgentID   *string `json:"server_agent_id"`
 }
 
 // getSettings 读取设置。
 // @Summary     读取设置
-// @Description 飞书 webhook 与 secret 是否存在（secret 不回显明文）+ 公网机 agent_id
+// @Description nexus 事件上报配置（token 只回传是否已设）+ 公网机 agent_id
 // @Tags        设置
 // @Produce     json
 // @Success     200 {object} api.settingsView
@@ -305,23 +308,25 @@ type settingsBody struct {
 // @Router      /settings [get]
 func (s *Server) getSettings(c *gin.Context) {
 	ctx := c.Request.Context()
-	webhook, err := s.st.GetSetting(ctx, "feishu_webhook")
+	nexusURL, err := s.st.GetSetting(ctx, "nexus_url")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	secret, _ := s.st.GetSetting(ctx, "feishu_secret")
+	nexusSource, _ := s.st.GetSetting(ctx, "nexus_source")
+	token, _ := s.st.GetSetting(ctx, "nexus_ingest_token")
 	serverID, _ := s.st.GetSetting(ctx, "server_agent_id")
 	c.JSON(http.StatusOK, settingsView{
-		FeishuWebhook:   webhook,
-		FeishuSecretSet: secret != "",
-		ServerAgentID:   serverID,
+		NexusURL:      nexusURL,
+		NexusSource:   nexusSource,
+		NexusTokenSet: token != "",
+		ServerAgentID: serverID,
 	})
 }
 
 // putSettings 保存设置。
 // @Summary     保存设置
-// @Description 更新飞书 webhook（secret 为空保留原值）与公网机 agent_id（缺省字段 = 不修改）
+// @Description 更新 nexus 事件上报配置（token 为空保留原值）与公网机 agent_id（缺省字段 = 不修改）
 // @Tags        设置
 // @Accept      json
 // @Produce     json
@@ -337,26 +342,37 @@ func (s *Server) putSettings(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
-	if err := s.st.SetSetting(ctx, "feishu_webhook", body.FeishuWebhook); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+
+	if body.NexusURL != nil {
+		if err := s.st.SetSetting(ctx, "nexus_url", strings.TrimSpace(*body.NexusURL)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
-	secretSet := false
+	if body.NexusSource != nil {
+		if err := s.st.SetSetting(ctx, "nexus_source", strings.TrimSpace(*body.NexusSource)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	// ingest token：空 = 保留原值；NexusTokenClear = 显式清除。
+	tokenSet := false
 	switch {
-	case body.FeishuSecretClear:
-		if err := s.st.SetSetting(ctx, "feishu_secret", ""); err != nil {
+	case body.NexusTokenClear:
+		if err := s.st.SetSetting(ctx, "nexus_ingest_token", ""); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-	case body.FeishuSecret != "":
-		if err := s.st.SetSetting(ctx, "feishu_secret", body.FeishuSecret); err != nil {
+	case body.NexusToken != "":
+		if err := s.st.SetSetting(ctx, "nexus_ingest_token", body.NexusToken); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		secretSet = true
+		tokenSet = true
 	default:
-		if cur, _ := s.st.GetSetting(ctx, "feishu_secret"); cur != "" {
-			secretSet = true
+		if cur, _ := s.st.GetSetting(ctx, "nexus_ingest_token"); cur != "" {
+			tokenSet = true
 		}
 	}
 
@@ -389,23 +405,31 @@ func (s *Server) putSettings(c *gin.Context) {
 		}
 		serverID = next
 	}
-	c.JSON(http.StatusOK, settingsView{FeishuWebhook: body.FeishuWebhook, FeishuSecretSet: secretSet, ServerAgentID: serverID})
+
+	nexusURL, _ := s.st.GetSetting(ctx, "nexus_url")
+	nexusSource, _ := s.st.GetSetting(ctx, "nexus_source")
+	c.JSON(http.StatusOK, settingsView{
+		NexusURL:      nexusURL,
+		NexusSource:   nexusSource,
+		NexusTokenSet: tokenSet,
+		ServerAgentID: serverID,
+	})
 }
 
-// feishuTest 发送测试消息。
-// @Summary     测试飞书机器人
-// @Description 按当前配置发送一条测试消息
+// notifyTest 发送测试事件到 nexus。
+// @Summary     测试通知（nexus 连通性）
+// @Description 按当前 nexus 配置上报一条测试事件
 // @Tags        设置
 // @Success     200 {object} map[string]string
 // @Failure     400 {object} map[string]string "未配置或发送失败"
 // @Security    BearerAuth
-// @Router      /settings/feishu-test [post]
-func (s *Server) feishuTest(c *gin.Context) {
+// @Router      /settings/notify-test [post]
+func (s *Server) notifyTest(c *gin.Context) {
 	if err := alert.SendTest(c.Request.Context(), s.st); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "测试消息已发送"})
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "测试事件已上报 nexus"})
 }
 
 // ---- 告警规则 ----

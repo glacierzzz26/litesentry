@@ -142,7 +142,7 @@ func TestPutSettingsServerAgentID(t *testing.T) {
 	realID := agents[0].AgentID
 
 	// 缺省字段：不修改（当前为空 → 仍为空）
-	code, _ := doJSON(t, r, http.MethodPut, "/api/settings", tok, `{"feishu_webhook":""}`)
+	code, _ := doJSON(t, r, http.MethodPut, "/api/settings", tok, `{"nexus_url":""}`)
 	if code != http.StatusOK {
 		t.Fatalf("PUT settings status=%d，期望 200", code)
 	}
@@ -152,14 +152,14 @@ func TestPutSettingsServerAgentID(t *testing.T) {
 
 	// 指向未注册 id → 400
 	code, resp := doJSON(t, r, http.MethodPut, "/api/settings", tok,
-		`{"feishu_webhook":"","server_agent_id":"nonexistent"}`)
+		`{"nexus_url":"","server_agent_id":"nonexistent"}`)
 	if code != http.StatusBadRequest {
 		t.Errorf("未注册 agent_id status=%d body=%s，期望 400", code, resp)
 	}
 
 	// 指向已注册 id → 200 且落库
 	code, resp = doJSON(t, r, http.MethodPut, "/api/settings", tok,
-		`{"feishu_webhook":"","server_agent_id":"`+realID+`"}`)
+		`{"nexus_url":"","server_agent_id":"`+realID+`"}`)
 	if code != http.StatusOK {
 		t.Fatalf("已注册 agent_id status=%d body=%s，期望 200", code, resp)
 	}
@@ -174,7 +174,7 @@ func TestPutSettingsServerAgentID(t *testing.T) {
 
 	// 空串 = 清除
 	code, _ = doJSON(t, r, http.MethodPut, "/api/settings", tok,
-		`{"feishu_webhook":"","server_agent_id":""}`)
+		`{"nexus_url":"","server_agent_id":""}`)
 	if code != http.StatusOK {
 		t.Fatalf("清除 status=%d，期望 200", code)
 	}

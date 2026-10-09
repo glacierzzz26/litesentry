@@ -1,7 +1,7 @@
 # litesentry · 轻量主机 + 容器监控
 
 面向个人量化研究系统的主机/容器监控。**Agent 推送 → gRPC → Server 落库 → React 面板**，
-单一二进制发布，SQLite 开箱即用；内置阈值告警引擎，可推送飞书机器人。
+单一二进制发布，SQLite 开箱即用；内置阈值告警引擎，告警经 **nexus 事件中心** 统一路由发送飞书。
 
 > 技术栈：Agent = **Rust** · Server = **Go + Gin** · 前端 = **React 19 + Ant Design v5 + Tailwind CSS v4**（手写 SVG 图表，深/浅双主题）· 通信 = **gRPC**（双向 TLS + token 鉴权；未配证书时明文回落，仅限联调）
 
@@ -11,7 +11,7 @@
 ┌─ Agent (Rust) ──────────┐        ┌─ Server (Go + Gin) ──────────────────────┐
 │ 主机采集 (sysinfo)       │  gRPC   │  :9000 接收 + token/白名单鉴权            │
 │ 容器采集 (bollard)       │ ─────→  │  Store: SQLite 默认 / PG 可选             │
-│ IPv4/IPv6 地址探测       │  push   │  告警引擎 (60s 评估) ──→ 飞书机器人        │
+│ IPv4/IPv6 地址探测       │  push   │  告警引擎 (60s 评估) ──→ nexus 事件中心    │
 │ 自身 CPU/RSS 上报        │        │  :8080 REST + 内嵌 React 面板            │
 └─────────────────────────┘        │  :8080 /docs  Swagger UI                 │
                                    └───────────────────────────────────────────┘
@@ -120,7 +120,7 @@ v2 界面（按 `litesentry-prototype-v2.html` 重建）：左侧 **232px** 侧�
 | `#/container/:agent/:cid` | 容器详情：CPU/内存/网络曲线 + 基础信息 |
 | `#/alerts` | 告警事件（级别/规则/节点/指标/值阈值/开始时间） |
 | `#/alerts/rules` | 告警规则配置（新建/编辑/删除/启用） |
-| `#/settings` | 设置：API Token + 飞书机器人（webhook + secret + 发送测试） |
+| `#/settings` | 设置：用户管理 + 告警通知（Nexus：地址 / source / token + 发送测试） |
 
 > 节点一律以**主机名**展示（`agent_id` 不直接显示）。
 
@@ -128,7 +128,7 @@ v2 界面（按 `litesentry-prototype-v2.html` 重建）：左侧 **232px** 侧�
 
 - **规则**：指标 = CPU/内存/负载/磁盘/容器 CPU/容器内存/容器停止/节点离线，比较 `>` `<`，可设持续秒数（防抖）与级别（warning/critical）。
 - **评估**：Server 每 60s 扫描一次；持续超阈值达到 `duration_s` 才触发（firing），恢复后自动 resolve；同一事件通知冷却 30 分钟防刷屏。
-- **通知**：飞书自定义机器人，HMAC-SHA256 签名（`base64(HMAC-SHA256(secret, timestamp+"\n"+secret))`），配置改动实时生效。
+- **通知**：firing / resolved 各作为一条事件上报 **nexus 事件中心**（`POST {nexus_url}/api/v1/events`，`Authorization: Bearer <ingest token>`），由 nexus 按 severity 路由并发送飞书。配置存 `settings` 表（设置页可改、即时生效），未配置则跳过并记日志。**本服务不再直连飞书。**
 - 事件存 `alert_events` 表（随 30 天保留期清理），面板「告警事件」页可查。
 
 ## 安全
@@ -137,7 +137,7 @@ v2 界面（按 `litesentry-prototype-v2.html` 重建）：左侧 **232px** 侧�
 - **应用层鉴权**：Bearer token（`authorization: Bearer <token>`）+ agent_id 白名单（`--allow-agents`）+ 时间戳防重放（±5 分钟），mTLS 之上再兜一层。
 - **Web 面板**：JWT（HS256，`sub`=用户 id）；密码 bcrypt 落库、**绝不通过 JSON 回传**；登录连续失败 5 次锁定 15 分钟。
 - **密钥不进命令行**：token / JWT 密钥 / 种子账号支持环境变量（`LITESENTRY_*`）注入，避免被 `ps` 读到；`-prod` 强制安全基线。
-- **飞书 secret**：只参与 HMAC 签名计算，**绝不写入日志**；设置接口只回传"是否已配置"。
+- **nexus ingest token**：只出现在上报请求的 `Authorization` 头，**绝不写入日志**；设置接口只回传"是否已配置"。
 - 证书私钥 / token 文件权限 **0600**。
 
 ## 生产部署
@@ -234,7 +234,7 @@ proto/                    # 唯一数据契约（gRPC）
 server/                   # Go + Gin
   internal/grpc/          #   gRPC 接收 + 鉴权
   internal/store/         #   Store 抽象：SQLite 默认 + PostgreSQL 可选
-  internal/alert/         #   告警评估引擎 + 飞书通知
+  internal/alert/         #   告警评估引擎 + nexus 事件上报
   internal/api/           #   REST（/api）+ Swagger 注解
   internal/webui/         #   内嵌 React 构建产物
   cmd/server/             #   入口
@@ -254,5 +254,5 @@ docs/                     # gRPC 契约文档（protoc-gen-doc 生成）
 
 ## 路线图
 
-- 阶段一（当前）：主机 + 容器 + 地址面板，SQLite 落库，REST 供前端，阈值告警 + 飞书通知。
+- 阶段一（当前）：主机 + 容器 + 地址面板，SQLite 落库，REST 供前端，阈值告警经 nexus 事件中心通知。
 - 阶段二（已落地）：Agent 插件化 —— 二进制插件由 Server 指派（`DesiredState` 下发 + `FetchPlugin` 分块拉取），`Series` 字段承载插件指标；FRP 隧道管理与定时任务均在 agent 侧执行。**内置采集插件（host/docker/disk）随 agent 旁路发布，并并入同一套插件体系** —— 注册时上报内置清单，Server 做一次性默认兜底指派，此后可像外部插件一样取消指派 / 升级。后续 Pro 版可在此基础扩展安全 / AI 能力。

@@ -16,7 +16,7 @@
 | **IPv6** | **通信走 IPv4**；Agent 采集并上报本机全部 IPv4 + IPv6 全局地址，面板展示，便于 IPv6 直连/ssh |
 | **安全防护** | 一级需求；gRPC 双向 **mTLS 已真正接线**（`-prod` 强制），未配证书时明文回落仅限联调；token / 白名单 / 时间戳防重放测试即启用 |
 | **监控对象** | 主机（CPU/内存/磁盘/网络/负载）+ 容器（CPU/内存/网络/状态/重启数）+ **Agent 自身进程开销**（CPU/RSS） |
-| **告警** | 内置阈值告警引擎（8 类指标，持续超限防抖），推送**飞书自定义机器人**（HMAC-SHA256 签名） |
+| **告警** | 内置阈值告警引擎（8 类指标，持续超限防抖），经 **nexus 事件中心** 上报（去重 / 路由，由其发送飞书通知），本服务不直连飞书 |
 | **Web 鉴权** | 面板 **JWT** 登录 + bcrypt 密码 + 用户管理（首登强制改密） |
 
 ## 总体架构
@@ -26,7 +26,7 @@
 │  Agent (Rust)   │ ──────────────────────▶ │  Server (Go + Gin)           │
 │  · 主机采集 sysinfo │  :9000 Register+Push    │  · gRPC 接收 / token/白名单      │
 │  · 容器采集 bollard │   token（可选 mTLS）      │  · Store: SQLite 默认 / PG 可选  │
-│  · IPv4/IPv6 探测 │                         │  · 告警引擎 60s ──▶ 飞书机器人    │
+│  · IPv4/IPv6 探测 │                         │  · 告警引擎 60s ──▶ nexus 事件中心 │
 │  · 自身 CPU/RSS   │                         │  · REST + JWT 供前端           │
 └─────────────────┘                          │  · 内嵌 React SPA + Swagger    │
                     浏览器 (React SPA)          └──────────────┬───────────────┘
@@ -93,7 +93,7 @@ type Store interface {
   Agents(ctx) ([]*Agent, error)
   Overview(ctx, from, to) (*Overview, error)             // 每节点最新主机样本 + 最高磁盘占用 + firing 事件数（消除 N+1）
 
-  GetSetting / SetSetting                                  // 通用设置（飞书 webhook/secret 等）
+  GetSetting / SetSetting                                  // 通用设置（nexus 地址/token 等）
 
   // ---- 用户（面板登录，密码 bcrypt）----
   CreateUser / UpdateUser / GetUserByID / GetUserByUsername / ListUsers / DeleteUser / CountUsers / SetLastLogin
@@ -154,7 +154,7 @@ CREATE TABLE container_metrics (
   PRIMARY KEY (agent_id, ts, container_id)
 );
 
--- 通用设置（飞书 webhook / secret 等）
+-- 通用设置（nexus 地址 / token 等）
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '', updated_at INTEGER);
 
 -- 面板登录用户（密码 bcrypt，绝不回传）
@@ -242,7 +242,7 @@ message Series { ... }        // 阶段二插件通用字段，阶段一预留�
 | GET | `/api/builtins` | 内置插件清单（聚合各节点注册上报的 host/docker/disk，按 id 分组；只读） |
 | GET | `/api/agents/:id/plugins` | 某节点已指派插件（`builtin` 标记内置；任务表单据此过滤） |
 | POST | `/api/plugins/:id/assign` | 指派插件版本到节点（`agent_id` 空串或 `server` → 公网机） |
-| GET/PUT | `/api/settings` · POST `/api/settings/feishu-test` | 飞书机器人配置 / 发送测试；`server_agent_id` 声明公网机（Server 同机 agent） |
+| GET/PUT | `/api/settings` · POST `/api/settings/notify-test` | nexus 事件上报配置（地址 / source / token）/ 发送测试；`server_agent_id` 声明公网机（Server 同机 agent） |
 | GET/POST | `/api/users` · PUT/DELETE `/api/users/:id` | 用户管理（重置密码、删除守卫） |
 
 ## 告警引擎
@@ -250,9 +250,11 @@ message Series { ... }        // 阶段二插件通用字段，阶段一预留�
 - **指标集**（8 类）：`cpu_pct` / `mem_pct` / `load_1m` / `disk_pct`（任一挂载点） / `container_cpu` / `container_mem` / `container_down`（state≠running） / `offline`（心跳 > 5min）
 - **规则**：比较符 `>` `<`、阈值、`duration_s` 持续防抖（0=立即）、级别 `warning/critical`、`enabled`
 - **评估**：Server 内 `alert.Engine` 每 **60s** 扫描各节点最新样本（5min 窗口），按 `ruleID|agentID|entityID` 维护**内存状态机**（breach 起始时间 → firing → resolve）
-- **通知**：firing 时发送**飞书自定义机器人**（HMAC-SHA256 签名），同一事件 **30min 冷却**防刷屏；恢复自动 resolve 并落库
+- **通知**：firing / resolved 各作为一条**事件**上报 **nexus 事件中心**（`POST {nexus_url}/api/v1/events`，`Authorization: Bearer <ingest token>`）；同一事件 **30min 冷却**防刷屏。字段映射：`severity`（warning→WARNING / critical→CRITICAL）、`status`（firing/resolved）、`alert_key`（`ruleID|agentID|entityID`，稳定 → nexus 侧折合同一告警）、`event_id`（firing=事件ID / resolved=`<id>-resolved` / 冷却重发=`<id>-rN`，确定性 → 重试幂等）。
+  - nexus 配置存 `settings` 表（`nexus_url` / `nexus_source` / `nexus_ingest_token`），设置页可改、**即时生效**（每次发送实时读）；未配置则跳过并记日志，不阻塞评估。**token 绝不写入日志**，设置接口只回传"是否已配置"。
+  - 去重、路由（按 severity）与飞书发送均由 nexus 负责；**本服务不再直连飞书**。
 - **事件**：`firing` / `resolved` 落 `alert_events` 表，面板「告警事件」页可查；总览页统计未恢复数
-- 通知失败不阻塞评估；`Notify` 注入点可替换（单元测试用 stub）
+- 通知失败不阻塞评估（留待冷却窗口后重试）；`Notify` 注入点可替换（单元测试用 stub）
 
 ## 用户与认证
 
@@ -273,7 +275,7 @@ message Series { ... }        // 阶段二插件通用字段，阶段一预留�
 | **端口收敛** | 只开 `:9000`（gRPC/mTLS）和 `:8080`/`:443`（Web）；Agent 零入站端口 |
 | **密钥管理** | token/CA 密钥 0600 权限，绝不写入代码和日志；日志脱敏 |
 | **生产基线** | `-prod` 强制：显式 JWT 密钥 + mTLS 证书齐全 + token 非空 + 禁止默认种子密码，任一不满足拒绝启动 |
-| **Docker 面** | Agent 只读 Docker socket，不具管理权限；飞书 secret 只参与 HMAC 计算，接口只回传"是否已配置" |
+| **Docker 面** | Agent 只读 Docker socket，不具管理权限；nexus ingest token 只出现在上报请求的 Authorization 头，接口只回传"是否已配置" |
 
 ## 前端设计语言（简约大气 · antd 浅色）
 
@@ -288,7 +290,7 @@ message Series { ... }        // 阶段二插件通用字段，阶段一预留�
   - `#/containers` 容器列表（跨节点，含所属主机）
   - `#/container/:agent/:cid` 容器详情：CPU/内存/网络曲线 + 基础信息
   - `#/alerts` 告警事件 · `#/alerts/rules` 告警规则配置
-  - `#/settings` 设置：**用户管理** + 飞书机器人
+  - `#/settings` 设置：**用户管理** + 告警通知（Nexus）
   - 未登录 → 登录页；首登/重置密码 → 强制改密页
 - 单浅色主题（设计期规划的明暗双主题未启用；暗色主题列为后续可选）
 
@@ -312,7 +314,7 @@ litesentry/
 │       ├── grpc/               # gRPC 接收 + mTLS + token/白名单/时间戳
 │       ├── store/              # Store 接口 + SQLite/PG 实现 + schema 迁移
 │       ├── api/                # gin REST + JWT 中间件 + 用户/设置/告警 handlers
-│       ├── alert/              # 阈值评估引擎 + 飞书通知
+│       ├── alert/              # 阈值评估引擎 + nexus 事件上报
 │       └── webui/              # 内嵌 React 构建产物 (embed)
 ├── web/                        # React 19 + Ant Design v5 + Tailwind v4
 ├── deploy/                     # 生产部署：gen-certs.sh / Dockerfile / nginx.conf /
@@ -334,7 +336,7 @@ litesentry/
 | proto（Register + Push + 预留 Stream/Series） | ✅ |
 | Rust Agent（主机/容器/IPv6/自监控/注册/60s 心跳） | ✅ |
 | Go Server（gRPC 鉴权、SQLite/PG、REST、JWT 用户、设置） | ✅ |
-| 告警引擎 + 飞书通知（8 类指标、防抖、冷却、事件落库） | ✅ |
+| 告警引擎 + nexus 事件上报（8 类指标、防抖、冷却、事件落库） | ✅ |
 | React 前端（8 页面 + 登录/强制改密 + 手写 SVG 图表） | ✅ |
 | 生产部署（单镜像、nginx HTTPS、mTLS、systemd、-prod 基线） | ✅ |
 | 单元测试（告警引擎、认证） | ✅ 基础 |
@@ -540,7 +542,7 @@ rpc FetchPlugin(PluginRequest) returns (stream Chunk);   // 流式分块 + sha25
 2. **插件签名**（Server 私钥/Agent 公钥验签）：列为后续加固项（个人工具单机信任模型下可选）
 3. **仅管理员上传 / 配置**：面板全 admin；任务执行全量 `task_runs` 审计
 4. **失败隔离**：插件崩溃/死循环不影响心跳；超时强杀、输出截断
-5. **frp token**：存 SQLite（与飞书 secret 同级），仅经 gRPC 已鉴权通道下发，绝不过 REST 回传明文
+5. **frp token**：存 SQLite（与 nexus ingest token 同级），仅经 gRPC 已鉴权通道下发，绝不过 REST 回传明文
 
 ## 实现路线（S0–S4，每步独立验收，可停顿续接）
 
