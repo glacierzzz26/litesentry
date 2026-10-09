@@ -1,4 +1,4 @@
-// 设置：用户管理（面板登录账号，bcrypt 加密）+ 飞书机器人（webhook + 签名 secret）。
+// 设置：用户管理（面板登录账号，bcrypt 加密）+ 告警通知（nexus 事件中心）。
 // 用户表格沿用主机/容器页的 antd Table 样式（.card 包裹 + scroll + 首末列留白）。
 
 import { useCallback, useEffect, useState } from 'react';
@@ -14,7 +14,7 @@ export default function Settings() {
   const me = useStore((s) => s.user);
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const [sending, setSending] = useState(false);
-  const [feishuForm] = Form.useForm();
+  const [nexusForm] = Form.useForm();
   const [serverForm] = Form.useForm();
   // 公网机候选：节点列表。展示主机名（agent_id 不露给用户），值仍是 agent_id。
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -32,12 +32,12 @@ export default function Settings() {
     try {
       const s = await api.settings();
       setSettings(s);
-      feishuForm.setFieldsValue({ webhook: s.feishu_webhook, secret: '', clearSecret: false });
+      nexusForm.setFieldsValue({ url: s.nexus_url, source: s.nexus_source, token: '', clearToken: false });
       serverForm.setFieldsValue({ agent_id: s.server_agent_id || undefined });
     } catch {
       /* mock 模式静默 */
     }
-  }, [feishuForm, serverForm]);
+  }, [nexusForm, serverForm]);
 
   const loadAgents = useCallback(async () => {
     try {
@@ -183,17 +183,18 @@ export default function Settings() {
     },
   ];
 
-  const saveFeishu = async () => {
-    const v = await feishuForm.validateFields();
+  const saveNexus = async () => {
+    const v = await nexusForm.validateFields();
     try {
       const res = await api.saveSettings({
-        feishu_webhook: v.webhook ?? '',
-        feishu_secret: v.secret ?? '',
-        feishu_secret_clear: v.clearSecret === true,
+        nexus_url: v.url ?? '',
+        nexus_source: v.source ?? '',
+        nexus_ingest_token: v.token ?? '',
+        nexus_ingest_token_clear: v.clearToken === true,
       });
       setSettings(res);
-      feishuForm.setFieldsValue({ secret: '', clearSecret: false });
-      message.success('飞书机器人配置已保存');
+      nexusForm.setFieldsValue({ token: '', clearToken: false });
+      message.success('告警通知配置已保存');
     } catch (e) {
       message.error(String(e));
     }
@@ -202,9 +203,8 @@ export default function Settings() {
   const saveServerAgent = async () => {
     const v = await serverForm.validateFields();
     try {
-      // 只提交公网机字段：飞书改由各自表单负责，这里带上现值避免覆盖（后端 webhook 为全量写）。
+      // 只提交公网机字段：nexus 表单各写各的（后端 nexus_* 为指针语义，缺省即不修改）。
       const res = await api.saveSettings({
-        feishu_webhook: settings?.feishu_webhook ?? '',
         server_agent_id: (v.agent_id as string) ?? '',
       });
       setSettings(res);
@@ -217,8 +217,8 @@ export default function Settings() {
   const test = async () => {
     setSending(true);
     try {
-      const res = await api.feishuTest();
-      message.success(res.message || '测试消息已发送');
+      const res = await api.notifyTest();
+      message.success(res.message || '测试事件已上报 nexus');
     } catch (e) {
       message.error(String(e).replace(/^Error:\s*/, ''));
     } finally {
@@ -251,33 +251,38 @@ export default function Settings() {
         />
       </section>
 
-      {/* 飞书机器人 */}
+      {/* 告警通知（nexus） */}
       <section className="card p-5">
-        <h3 className="mb-1 text-sm font-semibold" style={{ color: 'var(--fg)' }}>飞书机器人</h3>
+        <h3 className="mb-1 text-sm font-semibold" style={{ color: 'var(--fg)' }}>告警通知（Nexus）</h3>
         <p className="mb-4 text-xs" style={{ color: 'var(--mut)' }}>
-          阈值告警推送到飞书自定义机器人，HMAC-SHA256 签名。
+          阈值告警（触发 + 恢复）上报到 nexus 事件中心，由 nexus 统一去重、路由并发送飞书通知。本服务不再直连飞书。
         </p>
-        <Form form={feishuForm} layout="vertical" style={{ maxWidth: 560 }}>
-          <Form.Item name="webhook" label="Webhook 地址" extra="自定义机器人 → 复制 webhook（https://open.feishu.cn/open-apis/bot/v2/hook/...）">
-            <Input placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxx" />
+        <Form form={nexusForm} layout="vertical" style={{ maxWidth: 560 }}>
+          <Form.Item name="url" label="Nexus 地址" extra="事件上报入口，如 https://nexus.5home.online">
+            <Input placeholder="https://nexus.5home.online" />
+          </Form.Item>
+          <Form.Item name="source" label="数据源（source）" extra="留空默认 litesentry。nexus 按此标记来源，便于筛选与路由。">
+            <Input placeholder="litesentry" />
           </Form.Item>
           <Form.Item
-            name="secret"
-            label="签名密钥（secret）"
-            extra={settings?.feishu_secret_set ? '已保存。留空 = 不修改；如需清除勾选下方复选框。' : '未设置。留空 = 不设置。'}
+            name="token"
+            label="Ingest Token"
+            extra={settings?.nexus_ingest_token_set ? '已保存。留空 = 不修改；如需清除勾选下方复选框。' : '未设置。留空 = 不设置。'}
           >
-            <Input.Password placeholder={settings?.feishu_secret_set ? '已保存（留空 = 不修改）' : '签名 secret（可选）'} />
+            <Input.Password placeholder={settings?.nexus_ingest_token_set ? '已保存（留空 = 不修改）' : 'Bearer ingest token'} />
           </Form.Item>
-          <Form.Item name="clearSecret" valuePropName="checked">
-            <Checkbox>清除已保存的 secret</Checkbox>
+          <Form.Item name="clearToken" valuePropName="checked">
+            <Checkbox>清除已保存的 token</Checkbox>
           </Form.Item>
           <Space>
-            <Button type="primary" onClick={saveFeishu}>保存配置</Button>
-            <Button onClick={test} loading={sending} disabled={!settings?.feishu_webhook}>发送测试消息</Button>
+            <Button type="primary" onClick={saveNexus}>保存配置</Button>
+            <Button onClick={test} loading={sending} disabled={!settings?.nexus_url || !settings?.nexus_ingest_token_set}>
+              发送测试事件
+            </Button>
           </Space>
         </Form>
         <p className="mt-4 text-xs" style={{ color: 'var(--faint)' }}>
-          ℹ️ 测试阶段 webhook 与 secret 明文存于服务端数据库（不写入日志）；上线前需加密存储并启用 TLS/mTLS。
+          ℹ️ Token 明文存于服务端数据库（不写入日志、不回传前端）；无 TLS 时请自行评估风险。
         </p>
       </section>
 

@@ -1,15 +1,17 @@
 // Package alert 阈值评估引擎。
 //
 // 周期性（默认 60s）扫描各节点最新样本，对照已启用规则判定是否告警：
-// 持续超限 duration_s 才触发（firing），恢复后自动 resolve；
+// 持续超限 duration_s 才触发（firing），恢复后自动 resolve（并各发一次通知）；
 // 同一事件通知有 30min 冷却，避免刷屏。
 //
+// 通知经 nexus 事件中心（nexus.go），本包不再直连飞书。
 // 状态机仅存内存：Server 重启后重新累积 duration（可接受，配合冷却窗口）。
 package alert
 
 import (
 	"context"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 
@@ -40,6 +42,17 @@ type breach struct {
 	firing      bool
 	eventID     string // 当前 firing 事件的 ID（恢复时 resolve）
 	lastNotify  time.Time
+	renotifyN   int // 冷却重发计数（构造确定性重发 event_id：<id>-rN）
+}
+
+// Notification 是一次待发送的告警通知：承载事件本体 + 生命周期身份
+// （status/alert_key），供通知实现（nexus 上报）映射。
+//   - Status：firing | resolved
+//   - AlertKey：ruleID|agentID|entityID（稳定 → nexus 侧折合同一告警的触发/恢复）
+type Notification struct {
+	Event    *store.AlertEvent
+	Status   string
+	AlertKey string
 }
 
 // Engine 评估引擎。零成本构造；用 Run 启动。
@@ -48,9 +61,9 @@ type Engine struct {
 	mu    sync.Mutex
 	state map[string]*breach // key = ruleID|agentID|entityID
 
-	// Notify 告警通知注入点（默认飞书发送）。返回发送成功的时间；
+	// Notify 告警通知注入点（默认上报 nexus 事件）。返回发送成功的时间；
 	// 单元测试可替换为记录型 stub，避免真实 HTTP 调用。
-	Notify func(ctx context.Context, ev *store.AlertEvent) (time.Time, error)
+	Notify func(ctx context.Context, n Notification) (time.Time, error)
 }
 
 func New(st store.Store) *Engine {
@@ -203,6 +216,7 @@ func (e *Engine) check(ctx context.Context, now time.Time, r *store.AlertRule, a
 
 	var toFire *store.AlertEvent
 	var renotifyID string
+	var renotifySeq int
 	var resolveID string
 	var deleteKey bool
 
@@ -230,6 +244,8 @@ func (e *Engine) check(ctx context.Context, now time.Time, r *store.AlertRule, a
 		} else if st.firing && now.Sub(st.lastNotify) >= notifyCooldown {
 			st.lastNotify = now
 			renotifyID = st.eventID
+			st.renotifyN++
+			renotifySeq = st.renotifyN
 		}
 	} else {
 		if st.firing {
@@ -244,7 +260,7 @@ func (e *Engine) check(ctx context.Context, now time.Time, r *store.AlertRule, a
 			log.Printf("alert: append event: %v", err)
 			return
 		}
-		if nt, err := e.Notify(ctx, toFire); err != nil {
+		if nt, err := e.Notify(ctx, Notification{Event: toFire, Status: "firing", AlertKey: key}); err != nil {
 			// 通知失败不重试重发，留给冷却窗口后的下一次（或手动修复配置）
 			log.Printf("alert: notify rule=%q agent=%q: %v", toFire.RuleName, toFire.AgentName, err)
 		} else if err := e.st.SetEventNotified(ctx, toFire.ID, nt); err != nil {
@@ -252,11 +268,15 @@ func (e *Engine) check(ctx context.Context, now time.Time, r *store.AlertRule, a
 		}
 	}
 	if renotifyID != "" {
-		// 冷却到期仍超限：重发一次通知（不新建事件）
-		ev := &store.AlertEvent{RuleName: r.Name, AgentID: a.AgentID, AgentName: a.Hostname,
+		// 冷却到期仍超限：重发一次通知（不新建事件）。
+		// 用确定性 event_id（<id>-rN）：重发内容（值/时间）已变，若复用原 id 会撞 nexus 的 409。
+		ev := &store.AlertEvent{
+			ID:     renotifyID + "-r" + strconv.Itoa(renotifySeq),
+			RuleID: r.ID, RuleName: r.Name, AgentID: a.AgentID, AgentName: a.Hostname,
 			EntityID: entityID, EntityName: entityName, Metric: r.Metric,
-			Value: value, Threshold: r.Threshold, Severity: r.Severity, StartedAt: now}
-		if nt, err := e.Notify(ctx, ev); err != nil {
+			Value: value, Threshold: r.Threshold, Severity: r.Severity, StartedAt: now,
+		}
+		if nt, err := e.Notify(ctx, Notification{Event: ev, Status: "firing", AlertKey: key}); err != nil {
 			log.Printf("alert: renotify rule=%q agent=%q: %v", ev.RuleName, ev.AgentName, err)
 		} else if err := e.st.SetEventNotified(ctx, renotifyID, nt); err != nil {
 			log.Printf("alert: set notified_at: %v", err)
@@ -265,6 +285,17 @@ func (e *Engine) check(ctx context.Context, now time.Time, r *store.AlertRule, a
 	if resolveID != "" {
 		if err := e.st.ResolveEvent(ctx, resolveID, now); err != nil {
 			log.Printf("alert: resolve event %s: %v", resolveID, err)
+		}
+		// 恢复也通知一次（status=resolved，带 alert_key，供 nexus 折叠关闭）；
+		// 确定性 event_id（<id>-resolved）保证重试幂等。落库后发出，投递失败不回滚状态。
+		resolvedEv := &store.AlertEvent{
+			ID:     resolveID + "-resolved",
+			RuleID: r.ID, RuleName: r.Name, AgentID: a.AgentID, AgentName: a.Hostname,
+			EntityID: entityID, EntityName: entityName, Metric: r.Metric,
+			Value: value, Threshold: r.Threshold, Severity: r.Severity, State: "resolved", StartedAt: now,
+		}
+		if _, err := e.Notify(ctx, Notification{Event: resolvedEv, Status: "resolved", AlertKey: key}); err != nil {
+			log.Printf("alert: resolve-notify rule=%q agent=%q: %v", r.Name, a.Hostname, err)
 		}
 	}
 	if deleteKey {
